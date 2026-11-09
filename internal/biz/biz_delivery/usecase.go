@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"errors"
+	"sync/atomic"
 	"time"
 
 	"notifier/internal/constant"
@@ -30,14 +31,16 @@ type Config struct {
 
 // UseCase 是 worker 调用的执行编排。
 type UseCase struct {
-	Store      data_interface.DeliveryStore
-	Runtime    data_interface.ProviderRuntime
-	Schedule   data_interface.ScheduleOriginal
-	Now        func() time.Time
-	Jitter     func() (uint32, error)
-	WaitJitter func() (time.Duration, error)
-	Allow      func(callerID string) bool
-	Config     Config
+	Store    data_interface.DeliveryStore
+	Runtime  data_interface.ProviderRuntime
+	Schedule data_interface.ScheduleOriginal
+	Now      func() time.Time
+	Jitter   func() (uint32, error)
+	// LateConflicts 是迟到证据与当前结论冲突的告警计数（S06 RCV-08）。
+	LateConflicts atomic.Int64
+	WaitJitter    func() (time.Duration, error)
+	Allow         func(callerID string) bool
+	Config        Config
 }
 
 // Execute 处理一条指令，并返回 ACK 结论和最新任务。
@@ -313,7 +316,7 @@ func (u *UseCase) afterLease(ctx context.Context, task data_interface.TaskRecord
 		Evidence: view.EvidenceScope, HTTPDuration: &httpDur, ConfirmedNotSent: false,
 		CoversBusinessKey: view.CoversBusinessKey, CoveredAttemptIDs: view.CoveredAttemptIDs, Conflict: view.Conflict,
 		IdempotencyCovers: recheck.IdempotencyCovers, SupplierNotBefore: laterTime(view.SupplierNotBefore, recheck.SupplierNotBefore),
-		RoundAttemptCount: started.RoundAttemptCount, RoundNo: own.RoundNo, Prior: toDomainUnresolved(task.Unresolved),
+		RoundAttemptCount: started.RoundAttemptCount, RoundNo: own.RoundNo, Prior: data_interface.ToDomainUnresolved(task.Unresolved),
 	}
 	if sent.HTTPStatus > 0 {
 		code := sent.HTTPStatus
@@ -330,7 +333,7 @@ func (u *UseCase) finishNotSent(ctx context.Context, task data_interface.TaskRec
 		SendState: enums.SendNotSent, Outcome: enums.OutcomeLocalFailure, Retryable: true,
 		ErrorCode: code, ErrorReason: reason, ConfirmedNotSent: true, Constraint: constraint,
 		IdempotencyCovers: recheck.IdempotencyCovers, SupplierNotBefore: laterTime(supplier, recheck.SupplierNotBefore),
-		RoundAttemptCount: started.RoundAttemptCount, RoundNo: own.RoundNo, Prior: toDomainUnresolved(task.Unresolved),
+		RoundAttemptCount: started.RoundAttemptCount, RoundNo: own.RoundNo, Prior: data_interface.ToDomainUnresolved(task.Unresolved),
 	}
 	return u.finish(ctx, task, own, in, started.StartedAt)
 }
@@ -380,6 +383,9 @@ func (u *UseCase) finish(ctx context.Context, task data_interface.TaskRecord, ow
 		loaded, rerr := u.Store.LoadTask(ctx, own.DeliveryID)
 		if rerr != nil {
 			return domain.Step{Unconfirmed: true}, task, nil
+		}
+		if domain.LateConflict(loaded.Status, in.Outcome) {
+			u.LateConflicts.Add(1) // 人工核对告警；结案由 S07 授权核对完成
 		}
 		return domain.Step{ACK: true}, loaded, nil
 	}
@@ -459,27 +465,7 @@ func randomJitter() (uint32, error) {
 	return 5000 + uint32(n), nil
 }
 
-func factsOf(task data_interface.TaskRecord) domain.TaskFacts {
-	return domain.TaskFacts{
-		DeliveryID: task.DeliveryID, EventID: task.EventID, OutboxID: task.OutboxID, Status: task.Status,
-		ResultCertainty: task.ResultCertainty, RoundNo: task.RoundNo, ScheduleVersion: task.ScheduleVersion,
-		RowVersion: task.RowVersion, RoundAttemptCount: task.RoundAttemptCount, TotalAttemptCount: task.TotalAttemptCount,
-		MaxAttempts: task.MaxAttempts, RoundDeadlineAt: task.RoundDeadlineAt, ScheduledAt: task.ScheduledAt,
-		NextRetryAt: task.NextRetryAt, NextCheckAt: task.NextCheckAt, RoundFinishedAt: task.RoundFinishedAt,
-		CurrentAttemptID: task.CurrentAttemptID, LeaseToken: task.LeaseToken, LeaseExpiresAt: task.LeaseExpiresAt,
-		BlockedReason: task.BlockedReason, ResumeStatus: task.ResumeStatus, ResumeNotBefore: task.ResumeNotBefore,
-		BlockedSince: task.BlockedSince, RiskOperationID: task.RiskOperationID, RiskAttemptID: task.RiskAttemptID,
-		Unresolved: toDomainUnresolved(task.Unresolved),
-	}
-}
-
-func toDomainUnresolved(items []data_interface.UnresolvedRef) []domain.UnresolvedRef {
-	out := make([]domain.UnresolvedRef, len(items))
-	for i, item := range items {
-		out[i] = domain.UnresolvedRef{AttemptID: item.AttemptID, RoundNo: item.RoundNo}
-	}
-	return out
-}
+func factsOf(task data_interface.TaskRecord) domain.TaskFacts { return task.Facts() }
 
 func attemptDone(task data_interface.TaskRecord, attemptID uint64) bool {
 	for _, item := range task.Attempts {

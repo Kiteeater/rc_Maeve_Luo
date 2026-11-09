@@ -102,7 +102,11 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	worker := server.NewWorker(delivery, http, runner, mqSource)
 	publisher := newPublisher(outboxStore, rocketmqClient, outbox, rocketMQ, counters)
 	serverPublisher := newPublisherRole(publisher, outbox)
-	group := newRoles(worker, serverPublisher)
+	recoveryStore := mysql.NewRecoveryStore(db, executor)
+	recovery := globalConfig.Recovery
+	recoverer := newRecoverer(recoveryStore, runtime, recovery, outbox, delivery)
+	serverRecovery := newRecoveryRole(recoverer, recovery)
+	group := newRoles(worker, serverPublisher, serverRecovery)
 	mainApplication := newApplication(http, log, httpServer, group)
 	return mainApplication, func() {
 		cleanup4()

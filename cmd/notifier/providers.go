@@ -12,6 +12,7 @@ import (
 	"notifier/internal/biz/biz_event"
 	"notifier/internal/biz/biz_outbox"
 	"notifier/internal/biz/biz_provider"
+	"notifier/internal/biz/biz_recovery"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
 	"notifier/internal/data/redis"
@@ -129,8 +130,24 @@ func newPublisherRole(p *biz_outbox.Publisher, cfg conf.Outbox) *server.Publishe
 	return &server.Publisher{Runner: p, Interval: cfg.PollInterval, Batch: cfg.BatchSize}
 }
 
-func newRoles(worker *server.Worker, pub *server.Publisher) *server.Group {
-	return server.NewGroup(pub, worker)
+func newRoles(worker *server.Worker, pub *server.Publisher, rec *server.Recovery) *server.Group {
+	return server.NewGroup(pub, worker, rec)
+}
+
+// newRecoverer 组装 S06 恢复用例。
+func newRecoverer(store data_interface.RecoveryStore, cc data_interface.ConstraintChecker, r conf.Recovery, o conf.Outbox, d conf.Delivery) *biz_recovery.Recoverer {
+	return &biz_recovery.Recoverer{
+		Store: store, Constraints: cc, Counters: &biz_recovery.Counters{},
+		Config: biz_recovery.Config{
+			BatchSize: r.BatchSize, Parallelism: r.Parallelism, TaskTimeout: r.TaskTimeout, Grace: o.GracePeriod,
+			RepairCooldown: r.RepairCooldown, MaxRepairs: uint32(r.MaxRepairs), BlockedCheck: d.BlockedCheck,
+			DLQAutoRepairs: uint32(r.DLQAutoRepairs),
+		},
+	}
+}
+
+func newRecoveryRole(rec *biz_recovery.Recoverer, r conf.Recovery) *server.Recovery {
+	return &server.Recovery{Runner: rec, Interval: r.ScanInterval, ErrorBackoff: r.ErrorBackoff}
 }
 
 // newProviderRuntime 组装 S05 供应商执行边界。

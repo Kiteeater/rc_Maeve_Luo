@@ -120,3 +120,10 @@ const (
 	ErrAccountMismatch      = "ACCOUNT_MISMATCH"
 	ErrRateLimiterDown      = "RATE_LIMITER_UNAVAILABLE"
 )
+
+// S06 恢复告警码。
+const (
+	ErrRecoveryInconsistent   = "RECOVERY_INCONSISTENT"
+	ErrRecoveryManualRequired = "RECOVERY_MANUAL_REQUIRED"
+	ErrDLQInvalid             = "DLQ_INVALID_MESSAGE"
+)

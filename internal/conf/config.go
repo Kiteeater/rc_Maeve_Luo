@@ -147,7 +147,15 @@ type Outbox struct {
 
 // Recovery 补偿扫描参数。
 type Recovery struct {
-	ScanInterval time.Duration // 补偿扫描，建议 30s
+	ScanInterval   time.Duration // 补偿扫描，建议 30s
+	BatchSize      int
+	Parallelism    int
+	TaskTimeout    time.Duration
+	MaxGrace       time.Duration
+	RepairCooldown time.Duration
+	MaxRepairs     int
+	ErrorBackoff   time.Duration
+	DLQAutoRepairs int
 }
 
 // Retention 数据保留与缓存策略。
@@ -239,7 +247,11 @@ func Default() GlobalConfig {
 			ClockSafety:    time.Second,
 			MaxDeliveries:  16,
 		},
-		Recovery: Recovery{ScanInterval: 30 * time.Second},
+		Recovery: Recovery{
+			ScanInterval: 30 * time.Second, BatchSize: 100, Parallelism: 4, TaskTimeout: 5 * time.Second,
+			MaxGrace: 30 * time.Minute, RepairCooldown: 5 * time.Minute, MaxRepairs: 12, ErrorBackoff: 5 * time.Second,
+			DLQAutoRepairs: 3,
+		},
 		Retention: Retention{
 			OverviewCache: 5 * time.Second,
 			ResolvedAfter: 30 * 24 * time.Hour,
@@ -316,6 +328,10 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"PROVIDER_MAX_RESPONSE_BYTES", &c.Provider.MaxResponseBytes},
 		{"PROVIDER_MAX_REQUEST_BYTES", &c.Provider.MaxRequestBytes},
 		{"PROVIDER_MAX_IDLE_CONNECTIONS", &c.Provider.MaxIdleConnections},
+		{"RECOVERY_BATCH_SIZE", &c.Recovery.BatchSize},
+		{"RECOVERY_PARALLELISM", &c.Recovery.Parallelism},
+		{"RECOVERY_MAX_REPAIRS", &c.Recovery.MaxRepairs},
+		{"RECOVERY_DLQ_AUTO_REPAIRS", &c.Recovery.DLQAutoRepairs},
 	} {
 		if *it.dst, err = envInt(it.key, *it.dst); err != nil {
 			return GlobalConfig{}, err
@@ -428,6 +444,10 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"ROCKETMQ_MAX_DELAY", &c.Outbox.MaxDelay},
 		{"ROCKETMQ_CLOCK_SAFETY", &c.Outbox.ClockSafety},
 		{"RECOVERY_SCAN_INTERVAL", &c.Recovery.ScanInterval},
+		{"RECOVERY_TASK_TIMEOUT", &c.Recovery.TaskTimeout},
+		{"RECOVERY_MAX_GRACE", &c.Recovery.MaxGrace},
+		{"RECOVERY_REPAIR_COOLDOWN", &c.Recovery.RepairCooldown},
+		{"RECOVERY_ERROR_BACKOFF", &c.Recovery.ErrorBackoff},
 		{"RETENTION_OVERVIEW_CACHE", &c.Retention.OverviewCache},
 		{"RETENTION_RESOLVED_AFTER", &c.Retention.ResolvedAfter},
 		{"CONFIG_CALCULATION_TIMEOUT", &c.Config.CalculationTimeout},

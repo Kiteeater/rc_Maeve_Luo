@@ -49,41 +49,11 @@ func (r *Runtime) Prepare(ctx context.Context, in data_interface.PrepareRequest)
 	if now.IsZero() {
 		now = r.now()
 	}
-	ft, err := domain.ParseFixedTarget(task.FixedTarget)
-	if err != nil {
-		return block(constant.ErrConfigurationUnavail, "固定目标不可解析"), nil
+	pre, ft, ch := r.check(ctx, task, now, in.CallerAllowed)
+	if pre.Kind != domain.PrepareReady {
+		return pre, nil
 	}
-	if _, ok := r.Registry.Lookup(ft.AdapterType, ft.AdapterVersion); !ok {
-		return block(constant.ErrAdapterUnavailable, "原适配器版本未注册"), nil
-	}
-	ch, err := r.Channels.LoadChannelState(ctx, ft.ChannelID)
-	if err != nil {
-		return block(constant.ErrConfigurationUnavail, "通道不可用"), nil
-	}
-	if ch.ProviderID != ft.ProviderID || ch.ProviderAccountID != ft.ProviderAccountID || ch.Operation != ft.Operation ||
-		ch.AdapterType != ft.AdapterType {
-		return block(constant.ErrAccountMismatch, "通道归属与任务不一致"), nil
-	}
-	if !ch.Enabled {
-		return block(constant.ErrChannelDisabled, "通道已禁用"), nil
-	}
-	if !in.CallerAllowed || !contains(ch.AllowedCallers, task.CallerID) {
-		return block(constant.ErrCallerForbidden, "调用方无权使用通道"), nil
-	}
-	if !originAllowed(ft.BaseURL, ch.AllowedOrigins) {
-		return block(constant.ErrTargetForbidden, "原目标不再允许"), nil
-	}
-	resp := data_interface.PrepareResponse{Kind: domain.PrepareReady, ChannelVersion: ch.RowVersion, ReleaseID: task.ReleaseID}
-	if len(task.Unresolved) > 0 {
-		start := windowStart(task)
-		covers, until := domain.ReplaySafe(ft.IdemMode, ft.IdemWindow, start, now, r.Config.HTTPBudget)
-		resp.WindowStart, resp.SafeUntil, resp.IdempotencyCovers = start, until, covers
-		manual := task.RiskOperationID != "" && task.RiskAttemptID == nil && task.RoundAttemptCount == 0
-		if !covers && !manual {
-			return data_interface.PrepareResponse{Kind: domain.PrepareUnsafe, ErrorCode: constant.ErrUnsafeResend,
-				Reason: "供应商去重窗口不足以覆盖未决结果", WindowStart: start}, nil
-		}
-	}
+	resp := pre
 	ok, notBefore, err := r.Limiter.Take(ctx, ch.QuotaKey, ch.RatePerSecond, ch.Burst, ch.PolicyVersion)
 	if err != nil {
 		return data_interface.PrepareResponse{Kind: domain.PrepareWait, ErrorCode: constant.ErrRateLimitWait,
@@ -112,6 +82,66 @@ func (r *Runtime) Prepare(ctx context.Context, in data_interface.PrepareRequest)
 	}
 	resp.CredentialHandle = h.Opaque
 	return resp, nil
+}
+
+// check 是 Prepare 中无副作用的部分：适配器、通道当前约束、目标许可与重发安全。
+func (r *Runtime) check(ctx context.Context, task data_interface.TaskRecord, now time.Time, callerAllowed bool) (data_interface.PrepareResponse, domain.FixedTarget, data_interface.ChannelState) {
+	var ch data_interface.ChannelState
+	ft, err := domain.ParseFixedTarget(task.FixedTarget)
+	if err != nil {
+		return block(constant.ErrConfigurationUnavail, "固定目标不可解析"), ft, ch
+	}
+	if _, ok := r.Registry.Lookup(ft.AdapterType, ft.AdapterVersion); !ok {
+		return block(constant.ErrAdapterUnavailable, "原适配器版本未注册"), ft, ch
+	}
+	ch, err = r.Channels.LoadChannelState(ctx, ft.ChannelID)
+	if err != nil {
+		return block(constant.ErrConfigurationUnavail, "通道不可用"), ft, ch
+	}
+	if ch.ProviderID != ft.ProviderID || ch.ProviderAccountID != ft.ProviderAccountID || ch.Operation != ft.Operation ||
+		ch.AdapterType != ft.AdapterType {
+		return block(constant.ErrAccountMismatch, "通道归属与任务不一致"), ft, ch
+	}
+	if !ch.Enabled {
+		return block(constant.ErrChannelDisabled, "通道已禁用"), ft, ch
+	}
+	if !callerAllowed || !contains(ch.AllowedCallers, task.CallerID) {
+		return block(constant.ErrCallerForbidden, "调用方无权使用通道"), ft, ch
+	}
+	if !originAllowed(ft.BaseURL, ch.AllowedOrigins) {
+		return block(constant.ErrTargetForbidden, "原目标不再允许"), ft, ch
+	}
+	resp := data_interface.PrepareResponse{Kind: domain.PrepareReady, ChannelVersion: ch.RowVersion, ReleaseID: task.ReleaseID}
+	if len(task.Unresolved) > 0 {
+		start := windowStart(task)
+		covers, until := domain.ReplaySafe(ft.IdemMode, ft.IdemWindow, start, now, r.Config.HTTPBudget)
+		resp.WindowStart, resp.SafeUntil, resp.IdempotencyCovers = start, until, covers
+		manual := task.RiskOperationID != "" && task.RiskAttemptID == nil && task.RoundAttemptCount == 0
+		if !covers && !manual {
+			return data_interface.PrepareResponse{Kind: domain.PrepareUnsafe, ErrorCode: constant.ErrUnsafeResend,
+				Reason: "供应商去重窗口不足以覆盖未决结果", WindowStart: start}, ft, ch
+		}
+	}
+	return resp, ft, ch
+}
+
+// CheckConstraints 供 S06 恢复使用：不取凭证、不扣限流令牌、不发请求。
+// Covers 只看供应商幂等，不把已消耗的人工风险授权当作依据。
+func (r *Runtime) CheckConstraints(ctx context.Context, task data_interface.TaskRecord, now time.Time) (data_interface.ConstraintResult, error) {
+	probe := task
+	probe.RiskOperationID = ""
+	p, ft, _ := r.check(ctx, probe, now, true)
+	switch p.Kind {
+	case domain.PrepareBlock:
+		res := data_interface.ConstraintResult{Code: p.ErrorCode}
+		if ft.IdemMode != "" && len(task.Unresolved) > 0 {
+			res.Covers, _ = domain.ReplaySafe(ft.IdemMode, ft.IdemWindow, windowStart(task), now, r.Config.HTTPBudget)
+		}
+		return res, nil
+	case domain.PrepareUnsafe:
+		return data_interface.ConstraintResult{}, nil
+	}
+	return data_interface.ConstraintResult{Covers: p.IdempotencyCovers || len(task.Unresolved) == 0}, nil
 }
 
 // Build 用固定载荷和稳定幂等键构造请求；鉴权头与签名在发送时由 data/provider 按本次时间生成。

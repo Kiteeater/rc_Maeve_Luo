@@ -174,6 +174,9 @@ func validate(c *GlobalConfig) error {
 	if err := validateProvider(c); err != nil {
 		return err
 	}
+	if err := validateRecovery(c); err != nil {
+		return err
+	}
 	return validateOutbox(c)
 }
 
@@ -271,6 +274,41 @@ func intBetween(name string, value, min, max int) error {
 func durationBetween(name string, value, min, max time.Duration) error {
 	if value < min || value > max {
 		return fmt.Errorf("conf: %s out of range", name)
+	}
+	return nil
+}
+
+// validateRecovery 校验 S06 第 7 节扫描参数。
+func validateRecovery(c *GlobalConfig) error {
+	r := c.Recovery
+	for _, d := range []struct {
+		name     string
+		v        time.Duration
+		min, max time.Duration
+	}{
+		{"RECOVERY_SCAN_INTERVAL", r.ScanInterval, time.Second, 300 * time.Second},
+		{"RECOVERY_TASK_TIMEOUT", r.TaskTimeout, time.Second, 15 * time.Second},
+		{"RECOVERY_MAX_GRACE", r.MaxGrace, c.Outbox.GracePeriod, 2 * time.Hour},
+		{"RECOVERY_REPAIR_COOLDOWN", r.RepairCooldown, 30 * time.Second, time.Hour},
+		{"RECOVERY_ERROR_BACKOFF", r.ErrorBackoff, time.Second, 60 * time.Second},
+	} {
+		if err := durationBetween(d.name, d.v, d.min, d.max); err != nil {
+			return err
+		}
+	}
+	for _, n := range []struct {
+		name     string
+		v        int
+		min, max int
+	}{
+		{"RECOVERY_BATCH_SIZE", r.BatchSize, 1, 500},
+		{"RECOVERY_PARALLELISM", r.Parallelism, 1, 32},
+		{"RECOVERY_MAX_REPAIRS", r.MaxRepairs, 1, 100},
+		{"RECOVERY_DLQ_AUTO_REPAIRS", r.DLQAutoRepairs, 0, 10},
+	} {
+		if err := intBetween(n.name, n.v, n.min, n.max); err != nil {
+			return err
+		}
 	}
 	return nil
 }

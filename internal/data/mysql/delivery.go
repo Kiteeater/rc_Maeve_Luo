@@ -367,7 +367,34 @@ func lateTx(ctx context.Context, tx *sql.Tx, in data_interface.LateEvidenceInput
 	if err != nil {
 		return err
 	}
-	return insertHistory(ctx, tx, task, enums.PhaseLateResponse, task.Status, task.Status, in.Reason, task.ScheduleVersion, in.AttemptID, task.OutboxID, in.Evidence, now)
+	// 同内容重复追加只保留一次；不推进任务。
+	key := lateKey(in)
+	if done, err := keyExists(ctx, tx, task.DeliveryID, key); err != nil || done {
+		return err
+	}
+	seq, err := NextHistorySeq(ctx, tx, task.DeliveryID)
+	if err != nil {
+		return err
+	}
+	writeID, err := keyWriteID(task.DeliveryID, key)
+	if err != nil {
+		return err
+	}
+	var raw any
+	if len(in.Evidence) > 0 && json.Valid(in.Evidence) {
+		raw = string(in.Evidence)
+	}
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO delivery_history (
+			delivery_id, history_seq, write_id, phase, from_status, to_status, reason,
+			round_no, schedule_version, attempt_id, outbox_id, evidence, occurred_at, actor)
+		VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)`,
+		task.DeliveryID, seq, writeID, string(enums.PhaseLateResponse), string(task.Status), string(task.Status), clipReason(in.Reason),
+		task.RoundNo, task.ScheduleVersion, nullU64(in.AttemptID), nullU64(task.OutboxID), raw, utcWall(now), "worker")
+	if isUnique(err) {
+		return nil
+	}
+	return err
 }
 
 func applyTaskPlan(ctx context.Context, tx *sql.Tx, task data_interface.TaskRecord, plan domain.Plan, own *domain.Ownership, now time.Time) error {
