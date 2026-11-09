@@ -1,0 +1,96 @@
+# 本地开发与集成验证环境：MySQL、Redis、RocketMQ、通知服务与模拟供应商。
+# 注意：RocketMQ 镜像标签、Broker/Proxy 启动参数与 gRPC 接入端口需在实施阶段
+# 按所选 5.x SDK 版本验证兼容组合（见 TECH_DESIGN.md 第 2 节），此处为起始配置。
+
+services:
+  mysql:
+    image: mysql:8.4
+    environment:
+      MYSQL_ROOT_PASSWORD: root
+      MYSQL_DATABASE: notifier
+      MYSQL_USER: notifier
+      MYSQL_PASSWORD: notifier
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql-data:/var/lib/mysql
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-proot"]
+      interval: 5s
+      timeout: 5s
+      retries: 20
+
+  redis:
+    image: redis:7-alpine
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+
+  rocketmq-namesrv:
+    image: apache/rocketmq:5.3.1
+    command: sh mqnamesrv
+    environment:
+      JAVA_OPT_EXT: "-Xms256m -Xmx256m"
+    ports:
+      - "9876:9876"
+
+  rocketmq-broker:
+    image: apache/rocketmq:5.3.1
+    command: sh mqbroker -n rocketmq-namesrv:9876
+    depends_on:
+      - rocketmq-namesrv
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+      JAVA_OPT_EXT: "-Xms512m -Xmx512m"
+    volumes:
+      - rocketmq-store:/home/rocketmq/store
+    ports:
+      - "10909:10909"
+      - "10911:10911"
+
+  rocketmq-proxy:
+    image: apache/rocketmq:5.3.1
+    command: sh mqproxy -n rocketmq-namesrv:9876
+    depends_on:
+      - rocketmq-broker
+    environment:
+      NAMESRV_ADDR: rocketmq-namesrv:9876
+    ports:
+      - "8081:8081"
+
+  notifier:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    environment:
+      HTTP_ADDR: ":8080"
+      MYSQL_DSN: "notifier:notifier@tcp(mysql:3306)/notifier?parseTime=true&charset=utf8mb4"
+      REDIS_ADDR: "redis:6379"
+      ROCKETMQ_ENDPOINT: "rocketmq-proxy:8081"
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    ports:
+      - "8080:8080"
+
+  mockvendor:
+    build:
+      context: .
+      dockerfile: cmd/mockvendor/Dockerfile
+    environment:
+      MOCKVENDOR_ADDR: ":9090"
+    ports:
+      - "9090:9090"
+
+volumes:
+  mysql-data:
+  redis-data:
+  rocketmq-store:

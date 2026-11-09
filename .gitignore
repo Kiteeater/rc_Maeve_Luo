@@ -1,0 +1,21 @@
+# 构建产物
+/bin/
+*.exe
+*.test
+*.out
+
+# 覆盖率
+coverage.out
+coverage.html
+
+# 本地配置与密钥
+.env
+.env.local
+
+# 本地数据（compose bind mount 场景）
+/.data/
+
+# 编辑器 / 系统
+.DS_Store
+.idea/
+.vscode/

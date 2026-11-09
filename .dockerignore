@@ -1,0 +1,13 @@
+.git
+.gitignore
+.dockerignore
+*.md
+.env
+.env.*
+Makefile
+compose.yaml
+docker-compose*.yml
+bin/
+/data/
+.idea/
+.vscode/
