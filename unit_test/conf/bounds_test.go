@@ -62,9 +62,15 @@ func TestC08_BoundaryValuesLoad(t *testing.T) {
 	t.Setenv("HTTP_SHUTDOWN_TIMEOUT", "5s")
 	t.Setenv("HTTP_MAX_HEADER_BYTES", "1024")
 	t.Setenv("SUMMARY_MAX_BYTES", "8192")
-	t.Setenv("DELIVERY_HTTP_TIMEOUT", "1s")
+	// S03 收紧领取与不可见关系后，边界值同时满足批次 0 公式和新公式。
+	t.Setenv("DELIVERY_BUILD_TIMEOUT", "10ms")
+	t.Setenv("DELIVERY_HTTP_TIMEOUT", "100ms")
+	t.Setenv("DELIVERY_RESULT_RESERVE", "101ms")
 	t.Setenv("DELIVERY_LEASE_TIMEOUT", "5s")
-	t.Setenv("DELIVERY_MQ_INVISIBLE", "5200ms")
+	t.Setenv("DELIVERY_ACK_TIMEOUT", "100ms")
+	t.Setenv("DELIVERY_CREDENTIAL_PREPARE", "100ms")
+	t.Setenv("DELIVERY_MQ_INVISIBLE", "10200ms")
+	t.Setenv("DELIVERY_MQ_MAX_EXTENSION", "10200ms")
 	cfg, err := conf.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)

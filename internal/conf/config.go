@@ -88,19 +88,30 @@ type RocketMQ struct {
 	Group          string // 消费者分组
 }
 
-// Delivery 投递执行参数（技术方案第 13 节初始建议）。
-// S03 还会增加构造、结果预留和 ACK 预算；那些参数到位后收紧这里的关系检查。
+// Delivery 投递执行参数。
+// MaxAttempts、退避和 RoundDeadline 只用于生成发布模板。执行读取任务冻结的 round_policy。
+// CredentialPrepare 是启动关系里的凭证准备预算。真实获取由 S05 完成；届时与 PROVIDER_CREDENTIAL_TIMEOUT 对齐。
 type Delivery struct {
-	Parallelism    int           // 并行投递 worker 数，建议 10
-	HTTPTimeout    time.Duration // 供应商 HTTP 超时，建议 10s
-	LeaseTimeout   time.Duration // 任务领取期限，建议 30s
-	MQInvisible    time.Duration // MQ 不可见期限，建议 60s
-	MaxAttempts    int           // 每轮最多尝试次数，建议 8
-	BackoffInitial time.Duration // 退避起始，建议 5s
-	BackoffCap     time.Duration // 本地退避上限，建议 5m
-	ServerWaitCap  time.Duration // 服务端等待建议上限，建议 1h
-	RoundDeadline  time.Duration // 本轮等待截止，建议 24h
-	BlockedCheck   time.Duration // 阻塞条件检查间隔，建议 60s
+	Parallelism            int
+	HTTPTimeout            time.Duration
+	BuildTimeout           time.Duration
+	LeaseTimeout           time.Duration
+	ResultReserve          time.Duration
+	MQInvisible            time.Duration
+	AckTimeout             time.Duration
+	CredentialWait         time.Duration
+	CredentialPrepare      time.Duration
+	ReceiveBatch           int
+	ReceiveTimeout         time.Duration
+	MQMaxExtension         time.Duration
+	MaxAttempts            int
+	MaxAllowedAttempts     int
+	BackoffInitial         time.Duration
+	BackoffCap             time.Duration
+	ServerWaitCap          time.Duration
+	RoundDeadline          time.Duration
+	MaxAllowedRoundTimeout time.Duration
+	BlockedCheck           time.Duration
 }
 
 // Outbox 可靠发布参数。
@@ -158,16 +169,26 @@ func Default() GlobalConfig {
 			Group:          "notifier-worker",
 		},
 		Delivery: Delivery{
-			Parallelism:    10,
-			HTTPTimeout:    10 * time.Second,
-			LeaseTimeout:   30 * time.Second,
-			MQInvisible:    60 * time.Second,
-			MaxAttempts:    8,
-			BackoffInitial: 5 * time.Second,
-			BackoffCap:     5 * time.Minute,
-			ServerWaitCap:  time.Hour,
-			RoundDeadline:  24 * time.Hour,
-			BlockedCheck:   60 * time.Second,
+			Parallelism:            10,
+			HTTPTimeout:            10 * time.Second,
+			BuildTimeout:           time.Second,
+			LeaseTimeout:           30 * time.Second,
+			ResultReserve:          5 * time.Second,
+			MQInvisible:            60 * time.Second,
+			AckTimeout:             3 * time.Second,
+			CredentialWait:         5 * time.Second,
+			CredentialPrepare:      5 * time.Second,
+			ReceiveBatch:           10,
+			ReceiveTimeout:         5 * time.Second,
+			MQMaxExtension:         120 * time.Second,
+			MaxAttempts:            8,
+			MaxAllowedAttempts:     32,
+			BackoffInitial:         5 * time.Second,
+			BackoffCap:             5 * time.Minute,
+			ServerWaitCap:          time.Hour,
+			RoundDeadline:          24 * time.Hour,
+			MaxAllowedRoundTimeout: 168 * time.Hour,
+			BlockedCheck:           60 * time.Second,
 		},
 		Outbox: Outbox{
 			PollInterval: time.Second,
@@ -246,7 +267,13 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	if c.Delivery.Parallelism, err = envInt("DELIVERY_PARALLELISM", c.Delivery.Parallelism); err != nil {
 		return GlobalConfig{}, err
 	}
+	if c.Delivery.ReceiveBatch, err = envInt("DELIVERY_RECEIVE_BATCH", c.Delivery.ReceiveBatch); err != nil {
+		return GlobalConfig{}, err
+	}
 	if c.Delivery.MaxAttempts, err = envInt("DELIVERY_MAX_ATTEMPTS", c.Delivery.MaxAttempts); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Delivery.MaxAllowedAttempts, err = envInt("DELIVERY_MAX_ALLOWED_ATTEMPTS", c.Delivery.MaxAllowedAttempts); err != nil {
 		return GlobalConfig{}, err
 	}
 	if c.HTTP.MaxHeaderBytes, err = envInt("HTTP_MAX_HEADER_BYTES", c.HTTP.MaxHeaderBytes); err != nil {
@@ -304,12 +331,20 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"HTTP_SHUTDOWN_TIMEOUT", &c.HTTP.ShutdownTimeout},
 		{"MYSQL_OPERATION_TIMEOUT", &c.MySQL.OperationTimeout},
 		{"DELIVERY_HTTP_TIMEOUT", &c.Delivery.HTTPTimeout},
+		{"DELIVERY_BUILD_TIMEOUT", &c.Delivery.BuildTimeout},
 		{"DELIVERY_LEASE_TIMEOUT", &c.Delivery.LeaseTimeout},
+		{"DELIVERY_RESULT_RESERVE", &c.Delivery.ResultReserve},
 		{"DELIVERY_MQ_INVISIBLE", &c.Delivery.MQInvisible},
+		{"DELIVERY_ACK_TIMEOUT", &c.Delivery.AckTimeout},
+		{"DELIVERY_CREDENTIAL_WAIT", &c.Delivery.CredentialWait},
+		{"DELIVERY_CREDENTIAL_PREPARE", &c.Delivery.CredentialPrepare},
+		{"DELIVERY_RECEIVE_TIMEOUT", &c.Delivery.ReceiveTimeout},
+		{"DELIVERY_MQ_MAX_EXTENSION", &c.Delivery.MQMaxExtension},
 		{"DELIVERY_BACKOFF_INITIAL", &c.Delivery.BackoffInitial},
 		{"DELIVERY_BACKOFF_CAP", &c.Delivery.BackoffCap},
 		{"DELIVERY_SERVER_WAIT_CAP", &c.Delivery.ServerWaitCap},
 		{"DELIVERY_ROUND_DEADLINE", &c.Delivery.RoundDeadline},
+		{"DELIVERY_MAX_ALLOWED_ROUND_TIMEOUT", &c.Delivery.MaxAllowedRoundTimeout},
 		{"DELIVERY_BLOCKED_CHECK", &c.Delivery.BlockedCheck},
 		{"OUTBOX_POLL_INTERVAL", &c.Outbox.PollInterval},
 		{"OUTBOX_GRACE_PERIOD", &c.Outbox.GracePeriod},

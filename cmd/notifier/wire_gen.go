@@ -65,7 +65,16 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	biz_eventUseCase := newEventUseCase(eventStore, releaseStore, useCase, event)
 	eventService := newEventService(biz_eventUseCase, event)
 	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, set)
-	group := emptyRoles()
+	delivery := globalConfig.Delivery
+	deliveryStore := mysql.NewDeliveryStore(db, executor)
+	unavailableRuntime := provider.NewUnavailableRuntime()
+	pendingSchedule := rocketmq.NewPendingSchedule()
+	limits := globalConfig.Limits
+	biz_deliveryUseCase := newDeliveryUseCase(deliveryStore, unavailableRuntime, pendingSchedule, delivery, limits)
+	runner := newDeliveryRunner(biz_deliveryUseCase)
+	idleSource := newIdleSource()
+	worker := server.NewWorker(delivery, http, runner, idleSource)
+	group := newRoles(worker)
 	mainApplication := newApplication(http, log, httpServer, group)
 	return mainApplication, func() {
 		cleanup3()

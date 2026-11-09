@@ -87,5 +87,29 @@ const (
 	CodeFanoutExceeded           = "fanout_exceeded"
 	CodeAdmissionPaused          = "admission_paused"
 	CodeAcceptanceUnconfirmed    = "acceptance_unconfirmed"
+	CodeOwnershipLost            = "ownership_lost"
+	CodePreconditionChanged      = "precondition_changed"
 	CodeInternal                 = "internal"
+)
+
+// 投递诊断码。与任务状态分开保存，最近错误不替代任务级确定性。
+const (
+	ErrHTTPTimeout          = "HTTP_TIMEOUT"
+	ErrConnection           = "CONNECTION_ERROR"
+	ErrResponseRead         = "RESPONSE_READ_ERROR"
+	ErrResponseTooLarge     = "RESPONSE_TOO_LARGE"
+	ErrProviderRetryable    = "PROVIDER_RETRYABLE_REJECT"
+	ErrProviderPermanent    = "PROVIDER_PERMANENT_REJECT"
+	ErrAuthWait             = "AUTH_WAIT"
+	ErrRateLimitWait        = "RATE_LIMIT_WAIT"
+	ErrChannelDisabled      = "CHANNEL_DISABLED"
+	ErrCallerForbidden      = "CALLER_FORBIDDEN"
+	ErrAdapterUnavailable   = "ADAPTER_UNAVAILABLE"
+	ErrConfigurationUnavail = "CONFIGURATION_UNAVAILABLE"
+	ErrTargetForbidden      = "TARGET_FORBIDDEN"
+	ErrBuildFailed          = "BUILD_FAILED"
+	ErrLeaseExpired         = "LEASE_EXPIRED"
+	ErrAttemptLimit         = "ATTEMPT_LIMIT_REACHED"
+	ErrRoundDeadline        = "ROUND_DEADLINE_REACHED"
+	ErrUnsafeResend         = "UNSAFE_RESEND"
 )

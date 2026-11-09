@@ -69,8 +69,6 @@ func loadIdentities(cfg conf.Auth) (*auth.Set, error) {
 	return auth.LoadFile(cfg.ConfigRef)
 }
 
-func emptyRoles() *server.Group { return server.NewGroup() }
-
 // newReadiness 检查 MySQL、Redis、RocketMQ 和可用身份。探针响应不回传这里的错误文本。
 func newReadiness(db *sql.DB, rdb *goredis.Client, mq *rocketmq.Client, ids *auth.Set, cfg conf.MySQL) service.Readiness {
 	return func() error {

@@ -7,12 +7,14 @@ import (
 	goredis "github.com/redis/go-redis/v9"
 
 	"notifier/internal/biz/biz_config"
+	"notifier/internal/biz/biz_delivery"
 	"notifier/internal/biz/biz_event"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
 	"notifier/internal/data/redis"
 	"notifier/internal/data_interface"
 	"notifier/internal/domain"
+	"notifier/internal/server"
 	"notifier/internal/service"
 )
 
@@ -74,3 +76,26 @@ func newEventUseCase(store *mysql.EventStore, releases *mysql.ReleaseStore, plan
 func newEventService(uc *biz_event.UseCase, cfg conf.Event) *service.EventService {
 	return service.NewEventService(uc, cfg.MaxBodyBytes)
 }
+
+func newDeliveryUseCase(store data_interface.DeliveryStore, rt data_interface.ProviderRuntime, sched data_interface.ScheduleOriginal, cfg conf.Delivery, limits conf.Limits) *biz_delivery.UseCase {
+	return &biz_delivery.UseCase{
+		Store: store, Runtime: rt, Schedule: sched,
+		Config: biz_delivery.Config{
+			HTTPTimeout: cfg.HTTPTimeout, BuildTimeout: cfg.BuildTimeout, LeaseTimeout: cfg.LeaseTimeout,
+			ResultReserve: cfg.ResultReserve, CredentialWait: cfg.CredentialWait, BlockedCheck: cfg.BlockedCheck,
+			SummaryMax: limits.SummaryBytes, WorkerID: "notifier", Deployment: "local",
+		},
+	}
+}
+
+type deliveryRunner struct{ uc *biz_delivery.UseCase }
+
+func (r deliveryRunner) ExecuteInstruction(ctx context.Context, cmd domain.DeliveryCommand) (domain.Step, error) {
+	return r.uc.ExecuteInstruction(ctx, cmd)
+}
+
+func newDeliveryRunner(uc *biz_delivery.UseCase) server.Runner { return deliveryRunner{uc} }
+
+func newIdleSource() *server.IdleSource { return &server.IdleSource{} }
+
+func newRoles(worker *server.Worker) *server.Group { return server.NewGroup(worker) }

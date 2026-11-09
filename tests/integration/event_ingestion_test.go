@@ -331,6 +331,7 @@ func clearEvents(t *testing.T, db *sql.DB) {
 	t.Helper()
 	for _, stmt := range []string{
 		`DELETE FROM delivery_history`,
+		`DELETE FROM delivery_attempts`,
 		`DELETE FROM outbox_messages`,
 		`DELETE FROM delivery_tasks`,
 		`DELETE FROM business_events`,

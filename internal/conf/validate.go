@@ -18,13 +18,16 @@ const (
 	summaryBytesMax = 8192
 )
 
-// validate 检查 S00 第 9 节的取值边界，以及第 7 节的时间关系。
+// validate 检查 S00 第 9 节的取值边界，以及 S03 落地后的时间关系。
 //
-// HTTP 截止必须早于领取到期，结果事务余量按 MYSQL_OPERATION_TIMEOUT 计：
-// DELIVERY_HTTP_TIMEOUT + MYSQL_OPERATION_TIMEOUT < DELIVERY_LEASE_TIMEOUT。
-// MQ 不可见期限覆盖这一次本地处理预算：
+// 批次 0 的关系仍然成立：
+// DELIVERY_HTTP_TIMEOUT + MYSQL_OPERATION_TIMEOUT < DELIVERY_LEASE_TIMEOUT，
 // DELIVERY_MQ_INVISIBLE >= DELIVERY_LEASE_TIMEOUT + MYSQL_OPERATION_TIMEOUT。
-// S03 的构造超时、结果预留、ACK 和凭证准备预算尚未进入本配置，届时再收紧。
+// S03 在此之上要求：
+// BUILD_TIMEOUT + HTTP_TIMEOUT + RESULT_RESERVE < LEASE_TIMEOUT，
+// RESULT_RESERVE > MYSQL_OPERATION_TIMEOUT，
+// MQ_INVISIBLE >= CREDENTIAL_PREPARE + LEASE_TIMEOUT + ACK_TIMEOUT + 5s。
+// CREDENTIAL_PREPARE 在 S05 接入真实凭证预算前，用 DELIVERY_CREDENTIAL_PREPARE 表示同一段准备时间。
 func validate(c *GlobalConfig) error {
 	if err := durationBetween("HTTP_REQUEST_TIMEOUT", c.HTTP.RequestTimeout, httpRequestMin, httpRequestMax); err != nil {
 		return err
@@ -41,20 +44,75 @@ func validate(c *GlobalConfig) error {
 	if c.Limits.SummaryBytes < summaryBytesMin || c.Limits.SummaryBytes > summaryBytesMax {
 		return fmt.Errorf("conf: SUMMARY_MAX_BYTES out of range")
 	}
-	if c.Delivery.HTTPTimeout <= 0 {
-		return fmt.Errorf("conf: DELIVERY_HTTP_TIMEOUT out of range")
+	d := c.Delivery
+	if err := intBetween("DELIVERY_PARALLELISM", d.Parallelism, 1, 100); err != nil {
+		return err
 	}
-	if c.Delivery.LeaseTimeout <= 0 {
-		return fmt.Errorf("conf: DELIVERY_LEASE_TIMEOUT out of range")
+	if err := intBetween("DELIVERY_RECEIVE_BATCH", d.ReceiveBatch, 1, 32); err != nil {
+		return err
 	}
-	if c.Delivery.MQInvisible <= 0 {
-		return fmt.Errorf("conf: DELIVERY_MQ_INVISIBLE out of range")
+	if d.ReceiveBatch > d.Parallelism {
+		return fmt.Errorf("conf: DELIVERY_RECEIVE_BATCH must be <= DELIVERY_PARALLELISM")
 	}
-	if c.Delivery.HTTPTimeout+c.MySQL.OperationTimeout >= c.Delivery.LeaseTimeout {
+	if err := durationBetween("DELIVERY_HTTP_TIMEOUT", d.HTTPTimeout, 100*time.Millisecond, 60*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_BUILD_TIMEOUT", d.BuildTimeout, 10*time.Millisecond, 5*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_LEASE_TIMEOUT", d.LeaseTimeout, 5*time.Second, 300*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_RESULT_RESERVE", d.ResultReserve, time.Millisecond, 60*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_MQ_INVISIBLE", d.MQInvisible, 10*time.Second, 600*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_ACK_TIMEOUT", d.AckTimeout, 100*time.Millisecond, 10*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_CREDENTIAL_WAIT", d.CredentialWait, time.Second, 60*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_CREDENTIAL_PREPARE", d.CredentialPrepare, 100*time.Millisecond, 10*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_RECEIVE_TIMEOUT", d.ReceiveTimeout, 100*time.Millisecond, 20*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("DELIVERY_MQ_MAX_EXTENSION", d.MQMaxExtension, d.MQInvisible, 24*time.Hour); err != nil {
+		return err
+	}
+	if err := intBetween("DELIVERY_MAX_ATTEMPTS", d.MaxAttempts, 1, 32); err != nil {
+		return err
+	}
+	if err := intBetween("DELIVERY_MAX_ALLOWED_ATTEMPTS", d.MaxAllowedAttempts, 1, 32); err != nil {
+		return err
+	}
+	if d.MaxAttempts > d.MaxAllowedAttempts {
+		return fmt.Errorf("conf: DELIVERY_MAX_ATTEMPTS must be <= DELIVERY_MAX_ALLOWED_ATTEMPTS")
+	}
+	if err := durationBetween("DELIVERY_MAX_ALLOWED_ROUND_TIMEOUT", d.MaxAllowedRoundTimeout, time.Hour, 168*time.Hour); err != nil {
+		return err
+	}
+	if d.RoundDeadline > d.MaxAllowedRoundTimeout {
+		return fmt.Errorf("conf: DELIVERY_ROUND_DEADLINE must be <= DELIVERY_MAX_ALLOWED_ROUND_TIMEOUT")
+	}
+	if d.HTTPTimeout+c.MySQL.OperationTimeout >= d.LeaseTimeout {
 		return fmt.Errorf("conf: DELIVERY_HTTP_TIMEOUT + MYSQL_OPERATION_TIMEOUT must be < DELIVERY_LEASE_TIMEOUT")
 	}
-	if c.Delivery.MQInvisible < c.Delivery.LeaseTimeout+c.MySQL.OperationTimeout {
+	if d.MQInvisible < d.LeaseTimeout+c.MySQL.OperationTimeout {
 		return fmt.Errorf("conf: DELIVERY_MQ_INVISIBLE must be >= DELIVERY_LEASE_TIMEOUT + MYSQL_OPERATION_TIMEOUT")
+	}
+	if d.ResultReserve <= c.MySQL.OperationTimeout {
+		return fmt.Errorf("conf: DELIVERY_RESULT_RESERVE must be > MYSQL_OPERATION_TIMEOUT")
+	}
+	if d.BuildTimeout+d.HTTPTimeout+d.ResultReserve >= d.LeaseTimeout {
+		return fmt.Errorf("conf: DELIVERY_BUILD_TIMEOUT + DELIVERY_HTTP_TIMEOUT + DELIVERY_RESULT_RESERVE must be < DELIVERY_LEASE_TIMEOUT")
+	}
+	if d.MQInvisible < d.CredentialPrepare+d.LeaseTimeout+d.AckTimeout+5*time.Second {
+		return fmt.Errorf("conf: DELIVERY_MQ_INVISIBLE must be >= DELIVERY_CREDENTIAL_PREPARE + DELIVERY_LEASE_TIMEOUT + DELIVERY_ACK_TIMEOUT + 5s")
 	}
 	if err := intBetween("CONFIG_MAX_BYTES", c.Config.MaxBytes, 64*1024, 4*1024*1024); err != nil {
 		return err

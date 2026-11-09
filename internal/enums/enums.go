@@ -77,6 +77,8 @@ const (
 	PhaseManualRetry      HistoryPhase = "MANUAL_RETRY"
 	PhaseManualResolve    HistoryPhase = "MANUAL_RESOLVE"
 	PhaseLateResponse     HistoryPhase = "LATE_RESPONSE"
+	// PhaseRoundClosed 是无有效领取时因预算或期限结案。不新增尝试。
+	PhaseRoundClosed HistoryPhase = "ROUND_CLOSED"
 )
 
 // HistoryPhases 是固定阶段全集，供迁移容量和校验对照。
@@ -97,4 +99,5 @@ var HistoryPhases = []HistoryPhase{
 	PhaseManualRetry,
 	PhaseManualResolve,
 	PhaseLateResponse,
+	PhaseRoundClosed,
 }
