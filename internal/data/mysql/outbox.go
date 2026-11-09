@@ -203,7 +203,7 @@ func (s *OutboxStore) RecordPublishResult(ctx context.Context, in data_interface
 				published = utcWall(now)
 			}
 			if _, err := tx.ExecContext(ctx, `UPDATE outbox_messages SET publish_status = ?, next_publish_at = ?,
-				lease_token = NULL, lease_expires_at = NULL, last_error = ?, published_at = COALESCE(?, published_at)
+				lease_token = NULL, lease_expires_at = NULL, last_error = ?, last_published_at = COALESCE(?, last_published_at)
 				WHERE outbox_id = ?`, eff.Status, nullTime(&eff.NextPublishAt), nullStr(in.ErrorSummary), published, in.OutboxID); err != nil {
 				return err
 			}
