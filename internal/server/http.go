@@ -12,7 +12,7 @@ import (
 
 // NewHTTPServer 只组装 HTTP 传输，不承载协议转换或业务规则。
 // releases 为空时只保留健康检查和未实现的 /v1/ 入口。
-func NewHTTPServer(cfg conf.HTTP, health *service.HealthService, releases *service.ReleaseService, identities *auth.Set) *http.Server {
+func NewHTTPServer(cfg conf.HTTP, health *service.HealthService, releases *service.ReleaseService, events *service.EventService, identities *auth.Set) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Healthz)
 	mux.HandleFunc("GET /readyz", health.Readyz)
@@ -25,6 +25,9 @@ func NewHTTPServer(cfg conf.HTTP, health *service.HealthService, releases *servi
 		mux.Handle("POST /v1/config/releases/{id}/publish", protect(RequireJSON(http.HandlerFunc(releases.Publish))))
 		mux.Handle("GET /v1/config/releases/current", protect(http.HandlerFunc(releases.Current)))
 		mux.Handle("GET /v1/config/releases/{id}", protect(http.HandlerFunc(releases.Get)))
+	}
+	if events != nil {
+		mux.Handle("POST /v1/events", requirePermission(identities, constant.PermEventsWrite, RequireJSON(http.HandlerFunc(events.Submit))))
 	}
 	mux.Handle("/v1/", RequireJSON(http.HandlerFunc(service.NotImplemented)))
 	return &http.Server{

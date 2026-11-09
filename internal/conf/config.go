@@ -29,6 +29,19 @@ type GlobalConfig struct {
 	Auth      Auth
 	Limits    Limits
 	Config    Config
+	Event     Event
+}
+
+// Event 是 S02 受理入口的启动上限。业务用例使用注入后的副本，不读环境变量。
+type Event struct {
+	MaxBodyBytes          int
+	MaxFanout             int
+	MaxPlanBytes          int
+	MaxPendingOutbox      int
+	MaxOldestOutboxAge    time.Duration
+	BacklogSampleInterval time.Duration
+	BacklogSampleMaxAge   time.Duration
+	IdempotencyNamespace  string
 }
 
 // Config 是 S01 发布与计划计算的启动上限。业务计算使用注入后的副本，不读环境变量。
@@ -181,6 +194,16 @@ func Default() GlobalConfig {
 			MaxFanout:          50,
 			ServerWaitCap:      time.Hour,
 		},
+		Event: Event{
+			MaxBodyBytes:          256 << 10,
+			MaxFanout:             50,
+			MaxPlanBytes:          2 << 20,
+			MaxPendingOutbox:      100000,
+			MaxOldestOutboxAge:    time.Hour,
+			BacklogSampleInterval: time.Second,
+			BacklogSampleMaxAge:   5 * time.Second,
+			IdempotencyNamespace:  "local",
+		},
 	}
 }
 
@@ -256,6 +279,21 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	if c.Config.MaxFanout, err = envInt("CONFIG_MAX_FANOUT", c.Config.MaxFanout); err != nil {
 		return GlobalConfig{}, err
 	}
+	if c.Event.MaxBodyBytes, err = envInt("EVENT_MAX_BODY_BYTES", c.Event.MaxBodyBytes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Event.MaxFanout, err = envInt("EVENT_MAX_FANOUT", c.Event.MaxFanout); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Event.MaxPlanBytes, err = envInt("EVENT_MAX_PLAN_BYTES", c.Event.MaxPlanBytes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Event.MaxPendingOutbox, err = envInt("EVENT_MAX_PENDING_OUTBOX", c.Event.MaxPendingOutbox); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Event.IdempotencyNamespace, err = envRequired("DELIVERY_IDEMPOTENCY_NAMESPACE", c.Event.IdempotencyNamespace); err != nil {
+		return GlobalConfig{}, err
+	}
 
 	durations := []struct {
 		key string
@@ -280,6 +318,9 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"RETENTION_RESOLVED_AFTER", &c.Retention.ResolvedAfter},
 		{"CONFIG_CALCULATION_TIMEOUT", &c.Config.CalculationTimeout},
 		{"CONFIG_CACHE_TTL", &c.Config.CacheTTL},
+		{"EVENT_MAX_OLDEST_OUTBOX_AGE", &c.Event.MaxOldestOutboxAge},
+		{"EVENT_BACKLOG_SAMPLE_INTERVAL", &c.Event.BacklogSampleInterval},
+		{"EVENT_BACKLOG_SAMPLE_MAX_AGE", &c.Event.BacklogSampleMaxAge},
 	}
 	for _, d := range durations {
 		if *d.dst, err = envDuration(d.key, *d.dst); err != nil {

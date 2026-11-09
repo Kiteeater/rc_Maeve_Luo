@@ -36,6 +36,9 @@ const (
 	CodeConfigurationUnavailable = "configuration_unavailable"
 	CodePlanTimeout              = "plan_timeout"
 	CodeLimitExceeded            = "limit_exceeded"
+	CodeEventDataInvalid         = "event_data_invalid"
+	CodeFanoutExceeded           = "fanout_exceeded"
+	CodeAcceptanceUnconfirmed    = "acceptance_unconfirmed"
 )
 
 // StatusOf 返回稳定错误码对应的 HTTP 状态。
@@ -55,11 +58,11 @@ func StatusOf(code string) int {
 		return http.StatusRequestEntityTooLarge
 	case CodeUnsupportedMediaType:
 		return http.StatusUnsupportedMediaType
-	case CodeUnsupportedSchema, CodeNoMatchingRoute, CodeMappingInvalid, CodeUnsafeReplay, CodeConfigInvalid, CodeLimitExceeded:
+	case CodeUnsupportedSchema, CodeEventDataInvalid, CodeNoMatchingRoute, CodeMappingInvalid, CodeFanoutExceeded, CodeUnsafeReplay, CodeConfigInvalid, CodeLimitExceeded:
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
-	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeConfigurationUnavailable, CodePlanTimeout:
+	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeAcceptanceUnconfirmed, CodeConfigurationUnavailable, CodePlanTimeout:
 		return http.StatusServiceUnavailable
 	case CodeNotImplemented:
 		return http.StatusNotImplemented

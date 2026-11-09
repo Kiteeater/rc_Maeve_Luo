@@ -22,7 +22,7 @@ import (
 func initializeApp(ctx context.Context) (*application, func(), error) {
 	wire.Build(
 		conf.Load,
-		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Log", "Auth", "Config"),
+		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Log", "Auth", "Config", "Event"),
 		loadIdentities,
 		mysql.Open,
 		redis.Open,
@@ -38,6 +38,9 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 		wire.Bind(new(data_interface.AdapterRegistry), new(*provider.Registry)),
 		newConfigUseCase,
 		newReleaseService,
+		mysql.NewEventStore,
+		newEventUseCase,
+		newEventService,
 		newReadiness,
 		service.NewHealthService,
 		server.NewHTTPServer,

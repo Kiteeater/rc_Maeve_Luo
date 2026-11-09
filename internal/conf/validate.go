@@ -86,7 +86,47 @@ func validate(c *GlobalConfig) error {
 	if err := durationBetween("CONFIG_CACHE_TTL", c.Config.CacheTTL, time.Minute, 24*time.Hour); err != nil {
 		return err
 	}
+	if err := intBetween("EVENT_MAX_BODY_BYTES", c.Event.MaxBodyBytes, 1<<10, 1<<20); err != nil {
+		return err
+	}
+	if err := intBetween("EVENT_MAX_FANOUT", c.Event.MaxFanout, 1, 200); err != nil {
+		return err
+	}
+	if err := intBetween("EVENT_MAX_PLAN_BYTES", c.Event.MaxPlanBytes, 256<<10, 8<<20); err != nil {
+		return err
+	}
+	if err := intBetween("EVENT_MAX_PENDING_OUTBOX", c.Event.MaxPendingOutbox, 100, 1000000); err != nil {
+		return err
+	}
+	if err := durationBetween("EVENT_MAX_OLDEST_OUTBOX_AGE", c.Event.MaxOldestOutboxAge, time.Minute, 24*time.Hour); err != nil {
+		return err
+	}
+	if err := durationBetween("EVENT_BACKLOG_SAMPLE_INTERVAL", c.Event.BacklogSampleInterval, 100*time.Millisecond, 5*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("EVENT_BACKLOG_SAMPLE_MAX_AGE", c.Event.BacklogSampleMaxAge, c.Event.BacklogSampleInterval, 30*time.Second); err != nil {
+		return err
+	}
+	if c.Event.BacklogSampleMaxAge < c.Event.BacklogSampleInterval {
+		return fmt.Errorf("conf: EVENT_BACKLOG_SAMPLE_MAX_AGE must be >= EVENT_BACKLOG_SAMPLE_INTERVAL")
+	}
+	if !asciiAlnum(c.Event.IdempotencyNamespace, 1, 24) {
+		return fmt.Errorf("conf: DELIVERY_IDEMPOTENCY_NAMESPACE out of range")
+	}
 	return nil
+}
+
+func asciiAlnum(value string, minLen, maxLen int) bool {
+	if len(value) < minLen || len(value) > maxLen {
+		return false
+	}
+	for i := 0; i < len(value); i++ {
+		c := value[i]
+		if c < '0' || (c > '9' && c < 'A') || (c > 'Z' && c < 'a') || c > 'z' {
+			return false
+		}
+	}
+	return true
 }
 
 func intBetween(name string, value, min, max int) error {

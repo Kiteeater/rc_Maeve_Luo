@@ -60,7 +60,11 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	releaseCache := newReleaseCache(client, config)
 	useCase := newConfigUseCase(releaseStore, releaseStore, releaseStore, registry, releaseCache, config)
 	releaseService := newReleaseService(useCase, config)
-	httpServer := server.NewHTTPServer(http, healthService, releaseService, set)
+	eventStore := mysql.NewEventStore(db, executor)
+	event := globalConfig.Event
+	biz_eventUseCase := newEventUseCase(eventStore, releaseStore, useCase, event)
+	eventService := newEventService(biz_eventUseCase, event)
+	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, set)
 	group := emptyRoles()
 	mainApplication := newApplication(http, log, httpServer, group)
 	return mainApplication, func() {

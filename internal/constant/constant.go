@@ -82,5 +82,10 @@ const (
 	CodePlanTimeout              = "plan_timeout"
 	CodeLimitExceeded            = "limit_exceeded"
 	CodeDependencyUnavailable    = "dependency_unavailable"
+	CodePayloadTooLarge          = "payload_too_large"
+	CodeEventDataInvalid         = "event_data_invalid"
+	CodeFanoutExceeded           = "fanout_exceeded"
+	CodeAdmissionPaused          = "admission_paused"
+	CodeAcceptanceUnconfirmed    = "acceptance_unconfirmed"
 	CodeInternal                 = "internal"
 )

@@ -27,7 +27,7 @@ func TestHTTPRoutes(t *testing.T) {
 		{http.MethodGet, "/missing", http.StatusNotFound, ""},
 	} {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
-			srv := server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), nil, nil)
+			srv := server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), nil, nil, nil)
 			response := httptest.NewRecorder()
 			request := httptest.NewRequest(tc.method, tc.path, nil)
 			if tc.method == http.MethodPost {
@@ -64,7 +64,7 @@ func TestHTTPRoutes(t *testing.T) {
 
 func TestReadinessFailureDoesNotExposeDependencyErrors(t *testing.T) {
 	health := service.NewHealthService(func() error { return errors.New("mysql: secret-password") })
-	srv := server.NewHTTPServer(conf.Default().HTTP, health, nil, nil)
+	srv := server.NewHTTPServer(conf.Default().HTTP, health, nil, nil, nil)
 	response := httptest.NewRecorder()
 	srv.Handler.ServeHTTP(response, httptest.NewRequest(http.MethodGet, "/readyz", nil))
 	if response.Code != http.StatusServiceUnavailable || strings.Contains(response.Body.String(), "secret-password") {
