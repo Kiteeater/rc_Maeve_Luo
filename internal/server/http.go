@@ -1,9 +1,8 @@
-// Package server 构造传输服务，负责路由与中间件注册。
+// Package server 构造传输服务，负责路由、中间件与后台角色生命周期。
 package server
 
 import (
 	"net/http"
-	"time"
 
 	"notifier/internal/conf"
 	"notifier/internal/service"
@@ -14,10 +13,13 @@ func NewHTTPServer(cfg conf.HTTP, health *service.HealthService) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Healthz)
 	mux.HandleFunc("GET /readyz", health.Readyz)
-	mux.HandleFunc("/v1/", service.NotImplemented)
+	mux.Handle("/v1/", RequireJSON(http.HandlerFunc(service.NotImplemented)))
 	return &http.Server{
 		Addr:              cfg.Addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+		Handler:           RequestID(mux),
+		ReadHeaderTimeout: cfg.RequestTimeout,
+		ReadTimeout:       cfg.RequestTimeout,
+		WriteTimeout:      cfg.RequestTimeout,
+		MaxHeaderBytes:    cfg.MaxHeaderBytes,
 	}
 }

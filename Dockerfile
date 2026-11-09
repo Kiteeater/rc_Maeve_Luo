@@ -9,4 +9,6 @@ RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/notifier ./cmd/not
 
 FROM gcr.io/distroless/static-debian12:nonroot
 COPY --from=build /out/notifier /notifier
+COPY --from=build /src/config/identities.example.json /config/identities.example.json
+ENV AUTH_CONFIG_REF=/config/identities.example.json
 ENTRYPOINT ["/notifier"]

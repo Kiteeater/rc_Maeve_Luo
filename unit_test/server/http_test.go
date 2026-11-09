@@ -29,7 +29,11 @@ func TestHTTPRoutes(t *testing.T) {
 		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
 			srv := server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil))
 			response := httptest.NewRecorder()
-			srv.Handler.ServeHTTP(response, httptest.NewRequest(tc.method, tc.path, nil))
+			request := httptest.NewRequest(tc.method, tc.path, nil)
+			if tc.method == http.MethodPost {
+				request.Header.Set("Content-Type", "application/json")
+			}
+			srv.Handler.ServeHTTP(response, request)
 			if response.Code != tc.status {
 				t.Fatalf("status = %d, want %d", response.Code, tc.status)
 			}

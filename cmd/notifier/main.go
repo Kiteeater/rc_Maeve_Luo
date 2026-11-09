@@ -5,15 +5,23 @@ package main
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
-	"time"
 
+	goredis "github.com/redis/go-redis/v9"
+
+	"notifier/internal/auth"
 	"notifier/internal/conf"
+	"notifier/internal/data/redis"
+	"notifier/internal/data/rocketmq"
+	"notifier/internal/logredact"
+	"notifier/internal/server"
+	"notifier/internal/service"
 )
 
 func main() {
@@ -26,70 +34,60 @@ func main() {
 func run() error {
 	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
 	defer stop()
-	app, err := initializeApp(ctx)
+	app, cleanup, err := initializeApp(ctx)
+	if cleanup != nil {
+		defer cleanup()
+	}
 	if err != nil {
 		return err
 	}
-	slog.SetDefault(app.logger)
+	slog.SetDefault(app.log)
 	return app.run(ctx)
 }
 
 type application struct {
-	http   *http.Server
-	logger *slog.Logger
+	app *server.App
+	log *slog.Logger
 }
 
-func newApplication(logConfig conf.Log, srv *http.Server) *application {
-	return &application{http: srv, logger: newLogger(logConfig)}
+func newApplication(httpCfg conf.HTTP, logCfg conf.Log, srv *http.Server, roles *server.Group) *application {
+	logger := logredact.New(logCfg)
+	return &application{
+		log: logger,
+		app: &server.App{
+			HTTP:            srv,
+			Roles:           roles,
+			ShutdownTimeout: httpCfg.ShutdownTimeout,
+			Log:             logger,
+		},
+	}
 }
 
-func (a *application) run(ctx context.Context) error {
-	errCh := make(chan error, 1)
-	go func() {
-		a.logger.Info("http server listening", "addr", a.http.Addr)
-		errCh <- a.http.ListenAndServe()
-	}()
+func (a *application) run(ctx context.Context) error { return a.app.Run(ctx) }
 
-	select {
-	case err := <-errCh:
-		if err != nil && !errors.Is(err, http.ErrServerClosed) {
+func loadIdentities(cfg conf.Auth) (*auth.Set, error) {
+	return auth.LoadFile(cfg.ConfigRef)
+}
+
+func emptyRoles() *server.Group { return server.NewGroup() }
+
+// newReadiness 检查 MySQL、Redis、RocketMQ 和可用身份。探针响应不回传这里的错误文本。
+func newReadiness(db *sql.DB, rdb *goredis.Client, mq *rocketmq.Client, ids *auth.Set, cfg conf.MySQL) service.Readiness {
+	return func() error {
+		ctx, cancel := context.WithTimeout(context.Background(), cfg.OperationTimeout)
+		defer cancel()
+		if err := db.PingContext(ctx); err != nil {
+			return errors.New("mysql: MYSQL_DSN: not ready")
+		}
+		if err := redis.Healthy(ctx, rdb); err != nil {
 			return err
 		}
+		if err := mq.Healthy(ctx); err != nil {
+			return err
+		}
+		if ids == nil || !ids.Available() {
+			return errors.New("auth: AUTH_CONFIG_REF: no usable identity")
+		}
 		return nil
-	case <-ctx.Done():
-		a.logger.Info("shutdown signal received")
 	}
-
-	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
-	defer cancel()
-	if err := a.http.Shutdown(shutdownCtx); err != nil {
-		_ = a.http.Close()
-		return err
-	}
-	a.logger.Info("notifier stopped")
-	return nil
-}
-
-// newLogger 依据配置构造结构化日志器，输出 JSON（默认）或文本。
-func newLogger(c conf.Log) *slog.Logger {
-	var level slog.Level
-	switch c.Level {
-	case "debug":
-		level = slog.LevelDebug
-	case "warn":
-		level = slog.LevelWarn
-	case "error":
-		level = slog.LevelError
-	default:
-		level = slog.LevelInfo
-	}
-
-	opts := &slog.HandlerOptions{Level: level}
-	var h slog.Handler
-	if c.Format == "text" {
-		h = slog.NewTextHandler(os.Stdout, opts)
-	} else {
-		h = slog.NewJSONHandler(os.Stdout, opts)
-	}
-	return slog.New(h)
 }

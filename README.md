@@ -11,15 +11,16 @@
 | 层 | 选型 |
 | --- | --- |
 | 语言与 HTTP | Go 1.26.2、`net/http` |
-| 数据库 | MySQL 8.4、InnoDB |
-| 数据访问 | `database/sql` + `go-sql-driver/mysql`、手写 SQL |
-| MQ | RocketMQ 5.x、`rocketmq-clients/golang/v5`（SimpleConsumer） |
-| 缓存 | Redis、`go-redis/v9` |
-| 迁移 | Goose v3 |
+| 数据库 | MySQL 8.4.13、InnoDB |
+| 数据访问 | `database/sql` + `go-sql-driver/mysql` v1.9.3、手写 SQL |
+| MQ | RocketMQ 5.3.1、`rocketmq-clients/golang/v5` v5.1.4（SimpleConsumer） |
+| 缓存 | Redis 7.4.12、`go-redis/v9` v9.17.2 |
+| 迁移 | Goose v3.26.0（版本锁定在 `go.mod`） |
 | 本地环境 | Docker Compose |
 
-当前脚手架使用标准库 HTTP、Wire 编译期依赖注入和 Azure Key Vault SDK。
-数据库、MQ 与缓存的业务实现仍待开发，相关依赖按需引入（`make deps` 可一次性拉取）。
+当前进程使用标准库 HTTP、Wire 编译期依赖注入和 Azure Key Vault SDK。
+MySQL、Redis、RocketMQ 的连接、健康检查和通用事务执行器已接入；业务用例仍按后续规格实现。
+依赖版本见 [TECH_DESIGN.md 第 2 节](./TECH_DESIGN.md#2-技术选型)，`make deps` 按该节重新拉取。
 
 ## 目录结构
 
@@ -53,8 +54,9 @@ make build
 # 本地基础设施与模拟供应商
 docker compose up -d
 
-# 数据库迁移
+# 数据库迁移与 Topic（即时 + 延迟）
 make migrate-up
+make topics
 
 # 测试与静态检查
 make test
@@ -71,8 +73,9 @@ make wire
 身份使用 Azure SDK 的 `DefaultAzureCredential`，Azure 部署推荐托管身份；
 配置与授权方式见 [Azure 官方指南](https://learn.microsoft.com/en-us/azure/key-vault/secrets/quick-create-go)。
 
-目前 `/readyz` 保持骨架行为，未连接 MySQL、Redis 或 MQ；基础设施实现后必须在 Wire 中注入真实就绪检查。
+`/readyz` 检查 MySQL、Redis、RocketMQ Proxy 和可用身份配置。任一不可用时返回 503，响应体不回传依赖错误。`/healthz` 只表示进程仍在服务。
 
 通知服务通过宿主机 `8080` 端口访问，RocketMQ Proxy 的 gRPC 端口为 `8081`。
+模拟供应商只监听环回地址，用 `make mockvendor` 在宿主机启动；compose 不把它的端口映射出来。
 MySQL、Redis 和 Broker 的数据使用命名卷，`docker compose down` 后重新启动仍复用；
 `docker compose down -v` 会删除这些数据。

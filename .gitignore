@@ -11,6 +11,8 @@ coverage.html
 # 本地配置与密钥
 .env
 .env.local
+.mockvendor-state.json
+.mockvendor-state.json.tmp
 
 # 本地数据（compose bind mount 场景）
 /.data/

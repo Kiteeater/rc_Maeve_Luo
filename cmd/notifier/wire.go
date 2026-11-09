@@ -8,19 +8,28 @@ import (
 	"github.com/google/wire"
 
 	"notifier/internal/conf"
+	"notifier/internal/data/mysql"
+	"notifier/internal/data/redis"
+	"notifier/internal/data/rocketmq"
 	"notifier/internal/server"
 	"notifier/internal/service"
 )
 
-// initializeApp 是唯一的依赖组装入口。基础设施接入后替换 Readiness 值。
-func initializeApp(ctx context.Context) (*application, error) {
+// initializeApp 组装启动配置、身份、基础设施和 HTTP 入口。
+// 身份文件先于数据库拨号；连接失败时清理函数由 Wire 逆序调用。
+func initializeApp(ctx context.Context) (*application, func(), error) {
 	wire.Build(
 		conf.Load,
-		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "Log"),
-		wire.Value(service.Readiness(nil)),
+		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Log", "Auth"),
+		loadIdentities,
+		mysql.Open,
+		redis.Open,
+		rocketmq.Open,
+		newReadiness,
 		service.NewHealthService,
 		server.NewHTTPServer,
+		emptyRoles,
 		newApplication,
 	)
-	return nil, nil
+	return nil, nil, nil
 }

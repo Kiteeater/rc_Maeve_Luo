@@ -1,8 +1,9 @@
 // Package conf 加载进程启动配置，汇总环境变量与 Azure Key Vault 密钥。
 //
-// 所有运行参数均可通过环境变量覆盖，未设置时使用技术方案第 13 节给出的初始建议值。
+// 所有运行参数均可通过环境变量覆盖，未设置时使用技术方案第 13 节和 S00 第 9 节的初始值。
 // 配置值在启动时解析，运行期间不可变；需要动态调整的运行参数属于发布快照，
 // 由业务用例管理，不经过本包。GlobalConfig 通过构造函数注入，不使用可变全局变量。
+// 越界或关系不成立时启动失败。错误只包含参数名，不包含秘密值。
 package conf
 
 import (
@@ -25,16 +26,22 @@ type GlobalConfig struct {
 	Recovery  Recovery
 	Retention Retention
 	Log       Log
+	Auth      Auth
+	Limits    Limits
 }
 
 // HTTP 接入与查询服务。
 type HTTP struct {
-	Addr string // 监听地址，如 ":8080"
+	Addr            string        // 监听地址，如 ":8080"
+	RequestTimeout  time.Duration // 接入和管理请求总预算
+	ShutdownTimeout time.Duration // 先停止入口，再排空后台角色
+	MaxHeaderBytes  int           // 请求头上限，超限由 net/http 拒绝
 }
 
 // MySQL 主存储。
 type MySQL struct {
-	DSN string // 例：user:pass@tcp(127.0.0.1:3306)/notifier?parseTime=true&charset=utf8mb4
+	DSN              string        // 例：user:pass@tcp(127.0.0.1:3306)/notifier?parseTime=true&charset=utf8mb4
+	OperationTimeout time.Duration // 每个完整事务或查询的上限
 }
 
 // Redis 缓存与限流。
@@ -53,6 +60,7 @@ type RocketMQ struct {
 }
 
 // Delivery 投递执行参数（技术方案第 13 节初始建议）。
+// S03 还会增加构造、结果预留和 ACK 预算；那些参数到位后收紧这里的关系检查。
 type Delivery struct {
 	Parallelism    int           // 并行投递 worker 数，建议 10
 	HTTPTimeout    time.Duration // 供应商 HTTP 超时，建议 10s
@@ -89,13 +97,29 @@ type Log struct {
 	Format string // json | text
 }
 
-// Default 返回技术方案第 13 节给出的初始建议配置。
+// Auth 是身份映射引用。文件内容由 auth 包加载，本结构只保存路径。
+type Auth struct {
+	ConfigRef string
+}
+
+// Limits 是跨请求、响应和错误摘要共用的字节上限。
+type Limits struct {
+	SummaryBytes int
+}
+
+// Default 返回技术方案第 13 节和 S00 第 9 节给出的初始建议配置。
 func Default() GlobalConfig {
 	return GlobalConfig{
 		KeyVault: KeyVault{Timeout: 15 * time.Second},
-		HTTP:     HTTP{Addr: ":8080"},
+		HTTP: HTTP{
+			Addr:            ":8080",
+			RequestTimeout:  5 * time.Second,
+			ShutdownTimeout: 45 * time.Second,
+			MaxHeaderBytes:  16 * 1024,
+		},
 		MySQL: MySQL{
-			DSN: "notifier:notifier@tcp(127.0.0.1:3306)/notifier?parseTime=true&charset=utf8mb4",
+			DSN:              "notifier:notifier@tcp(127.0.0.1:3306)/notifier?parseTime=true&charset=utf8mb4",
+			OperationTimeout: 2 * time.Second,
 		},
 		Redis: Redis{Addr: "127.0.0.1:6379"},
 		RocketMQ: RocketMQ{
@@ -125,7 +149,9 @@ func Default() GlobalConfig {
 			OverviewCache: 5 * time.Second,
 			ResolvedAfter: 30 * 24 * time.Hour,
 		},
-		Log: Log{Level: "info", Format: "json"},
+		Log:    Log{Level: "info", Format: "json"},
+		Auth:   Auth{ConfigRef: "config/identities.example.json"},
+		Limits: Limits{SummaryBytes: 2048},
 	}
 }
 
@@ -142,17 +168,26 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	c.KeyVault.MySQLDSNSecret = envStr("MYSQL_DSN_SECRET", c.KeyVault.MySQLDSNSecret)
 	c.KeyVault.RedisPasswordSecret = envStr("REDIS_PASSWORD_SECRET", c.KeyVault.RedisPasswordSecret)
 	c.HTTP.Addr = envStr("HTTP_ADDR", c.HTTP.Addr)
-	c.MySQL.DSN = envStr("MYSQL_DSN", c.MySQL.DSN)
-	c.Redis.Addr = envStr("REDIS_ADDR", c.Redis.Addr)
+	var err error
+	if c.MySQL.DSN, err = envRequired("MYSQL_DSN", c.MySQL.DSN); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Redis.Addr, err = envRequired("REDIS_ADDR", c.Redis.Addr); err != nil {
+		return GlobalConfig{}, err
+	}
 	c.Redis.Password = envStr("REDIS_PASSWORD", c.Redis.Password)
-	c.RocketMQ.Endpoint = envStr("ROCKETMQ_ENDPOINT", c.RocketMQ.Endpoint)
+	if c.RocketMQ.Endpoint, err = envRequired("ROCKETMQ_ENDPOINT", c.RocketMQ.Endpoint); err != nil {
+		return GlobalConfig{}, err
+	}
 	c.RocketMQ.TopicImmediate = envStr("ROCKETMQ_TOPIC_IMMEDIATE", c.RocketMQ.TopicImmediate)
 	c.RocketMQ.TopicDelayed = envStr("ROCKETMQ_TOPIC_DELAYED", c.RocketMQ.TopicDelayed)
 	c.RocketMQ.Group = envStr("ROCKETMQ_GROUP", c.RocketMQ.Group)
 	c.Log.Level = envStr("LOG_LEVEL", c.Log.Level)
 	c.Log.Format = envStr("LOG_FORMAT", c.Log.Format)
+	if c.Auth.ConfigRef, err = envRequired("AUTH_CONFIG_REF", c.Auth.ConfigRef); err != nil {
+		return GlobalConfig{}, err
+	}
 
-	var err error
 	if c.Redis.DB, err = envInt("REDIS_DB", c.Redis.DB); err != nil {
 		return GlobalConfig{}, err
 	}
@@ -162,12 +197,21 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	if c.Delivery.MaxAttempts, err = envInt("DELIVERY_MAX_ATTEMPTS", c.Delivery.MaxAttempts); err != nil {
 		return GlobalConfig{}, err
 	}
+	if c.HTTP.MaxHeaderBytes, err = envInt("HTTP_MAX_HEADER_BYTES", c.HTTP.MaxHeaderBytes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Limits.SummaryBytes, err = envInt("SUMMARY_MAX_BYTES", c.Limits.SummaryBytes); err != nil {
+		return GlobalConfig{}, err
+	}
 
 	durations := []struct {
 		key string
 		dst *time.Duration
 	}{
 		{"AZURE_KEY_VAULT_TIMEOUT", &c.KeyVault.Timeout},
+		{"HTTP_REQUEST_TIMEOUT", &c.HTTP.RequestTimeout},
+		{"HTTP_SHUTDOWN_TIMEOUT", &c.HTTP.ShutdownTimeout},
+		{"MYSQL_OPERATION_TIMEOUT", &c.MySQL.OperationTimeout},
 		{"DELIVERY_HTTP_TIMEOUT", &c.Delivery.HTTPTimeout},
 		{"DELIVERY_LEASE_TIMEOUT", &c.Delivery.LeaseTimeout},
 		{"DELIVERY_MQ_INVISIBLE", &c.Delivery.MQInvisible},
@@ -191,6 +235,9 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	if err := l.resolveSecrets(ctx, &c); err != nil {
 		return GlobalConfig{}, err
 	}
+	if err := validate(&c); err != nil {
+		return GlobalConfig{}, err
+	}
 	return c, nil
 }
 
@@ -201,6 +248,18 @@ func envStr(key, def string) string {
 	return def
 }
 
+// envRequired 把显式空字符串当成错误。未设置时仍用默认值。
+func envRequired(key, def string) (string, error) {
+	v, ok := os.LookupEnv(key)
+	if !ok {
+		return def, nil
+	}
+	if v == "" {
+		return "", fmt.Errorf("conf: %s must not be empty", key)
+	}
+	return v, nil
+}
+
 func envInt(key string, def int) (int, error) {
 	v, ok := os.LookupEnv(key)
 	if !ok || v == "" {
@@ -208,7 +267,7 @@ func envInt(key string, def int) (int, error) {
 	}
 	n, err := strconv.Atoi(v)
 	if err != nil {
-		return 0, fmt.Errorf("config %s: 期望整数，得到 %q: %w", key, v, err)
+		return 0, fmt.Errorf("conf: %s: expected integer", key)
 	}
 	return n, nil
 }
@@ -220,7 +279,7 @@ func envDuration(key string, def time.Duration) (time.Duration, error) {
 	}
 	d, err := time.ParseDuration(v)
 	if err != nil {
-		return 0, fmt.Errorf("config %s: 期望时长（如 10s、5m、24h），得到 %q: %w", key, v, err)
+		return 0, fmt.Errorf("conf: %s: expected duration", key)
 	}
 	return d, nil
 }

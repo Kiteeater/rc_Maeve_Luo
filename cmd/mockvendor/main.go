@@ -1,34 +1,36 @@
 // mockvendor 是独立的模拟供应商进程，用于集成验证与故障演练。
 //
-// 它只用于测试通知服务的投递、重试与结果判定，不属于通知服务的业务代码。
-// 首次仅提供最简接收端点；故障注入与接收记录按 tests/integration 需要扩展。
+// 它只监听环回地址。容器端口映射访问不到 127.0.0.1，宿主机验证使用 make mockvendor。
 package main
 
 import (
 	"log/slog"
-	"net/http"
 	"os"
 	"time"
+
+	"notifier/internal/mockvendor"
 )
 
 func main() {
-	addr := envStr("MOCKVENDOR_ADDR", ":9090")
-
-	mux := http.NewServeMux()
-	mux.HandleFunc("/", func(w http.ResponseWriter, r *http.Request) {
-		slog.Info("received notification", "method", r.Method, "path", r.URL.Path)
-		w.Header().Set("Content-Type", "application/json")
-		w.WriteHeader(http.StatusOK)
-		_, _ = w.Write([]byte(`{"accepted":true}`))
-	})
-
-	srv := &http.Server{
-		Addr:              addr,
-		Handler:           mux,
-		ReadHeaderTimeout: 5 * time.Second,
+	opts := mockvendor.Options{
+		Addr:            os.Getenv("MOCKVENDOR_ADDR"),
+		StatePath:       envStr("MOCKVENDOR_STATE_PATH", ".mockvendor-state.json"),
+		DefaultScenario: os.Getenv("MOCKVENDOR_SCENARIO"),
 	}
-
-	slog.Info("mock vendor listening", "addr", addr)
+	if raw := os.Getenv("MOCKVENDOR_TIMEOUT"); raw != "" {
+		d, err := time.ParseDuration(raw)
+		if err != nil {
+			slog.Error("mockvendor config", "error", "MOCKVENDOR_TIMEOUT: expected duration")
+			os.Exit(1)
+		}
+		opts.Timeout = d
+	}
+	srv, err := mockvendor.New(opts)
+	if err != nil {
+		slog.Error("mockvendor config", "error", err)
+		os.Exit(1)
+	}
+	slog.Info("mock vendor listening", "addr", srv.Addr())
 	if err := srv.ListenAndServe(); err != nil {
 		slog.Error("mock vendor exited", "error", err)
 		os.Exit(1)

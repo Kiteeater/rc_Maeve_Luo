@@ -1,0 +1,59 @@
+// Package constant 存放跨模块共享、且没有行为的常量。
+package constant
+
+// 权限码。ops:read 不隐含写权限；写操作还要检查 caller_scopes。
+const (
+	PermEventsWrite         = "events:write"
+	PermDataRead            = "data:read"
+	PermOpsRead             = "ops:read"
+	PermConfigPublish       = "config:publish"
+	PermChannelsManage      = "channels:manage"
+	PermDeliveriesRetry     = "deliveries:retry"
+	PermDeliveriesResolve   = "deliveries:resolve"
+	PermDeliveriesRiskRetry = "deliveries:risk-retry"
+	PermDLQRepair           = "dlq:repair"
+)
+
+// Permissions 是首版全部权限码，顺序稳定，供配置校验使用。
+var Permissions = []string{
+	PermEventsWrite,
+	PermDataRead,
+	PermOpsRead,
+	PermConfigPublish,
+	PermChannelsManage,
+	PermDeliveriesRetry,
+	PermDeliveriesResolve,
+	PermDeliveriesRiskRetry,
+	PermDLQRepair,
+}
+
+// KnownPermission 判断权限码是否属于首版集合。
+func KnownPermission(code string) bool {
+	for _, item := range Permissions {
+		if item == code {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	// FingerprintVersion 是首版规范化算法版本。升级算法时递增，不能静默替换已保存的版本。
+	FingerprintVersion = 1
+
+	// JSON 结构上限。深度包含 envelope；数字按原始字面量字节计。
+	MaxJSONDepth           = 32
+	MaxJSONNumberLiteral   = 128
+	MaxJSONCoefficientBits = 64 // 十进制系数位数，不是二进制位宽
+	MaxJSONExponent        = 308
+
+	// MaxErrorDetails 是 422 明细条数上限。明细不含字段原始值。
+	MaxErrorDetails = 100
+
+	// MaxCallerScopes 是单个身份可声明的调用方范围上限。
+	MaxCallerScopes = 100
+
+	// Summary 字节上限的配置边界。截断按 UTF-8 字节进行，并另存截断标记。
+	SummaryBytesMin = 256
+	SummaryBytesMax = 8192
+)

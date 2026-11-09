@@ -9,27 +9,55 @@ package main
 import (
 	"context"
 	"notifier/internal/conf"
+	"notifier/internal/data/mysql"
+	"notifier/internal/data/redis"
+	"notifier/internal/data/rocketmq"
 	"notifier/internal/server"
 	"notifier/internal/service"
 )
 
 // Injectors from wire.go:
 
-// initializeApp 是唯一的依赖组装入口。基础设施接入后替换 Readiness 值。
-func initializeApp(ctx context.Context) (*application, error) {
+// initializeApp 组装启动配置、身份、基础设施和 HTTP 入口。
+// 身份文件先于数据库拨号；连接失败时清理函数由 Wire 逆序调用。
+func initializeApp(ctx context.Context) (*application, func(), error) {
 	globalConfig, err := conf.Load(ctx)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
-	log := globalConfig.Log
 	http := globalConfig.HTTP
-	readiness := _wireReadinessValue
+	log := globalConfig.Log
+	mySQL := globalConfig.MySQL
+	auth := globalConfig.Auth
+	set, err := loadIdentities(auth)
+	if err != nil {
+		return nil, nil, err
+	}
+	db, cleanup, err := mysql.Open(mySQL, set)
+	if err != nil {
+		return nil, nil, err
+	}
+	confRedis := globalConfig.Redis
+	client, cleanup2, err := redis.Open(confRedis, db)
+	if err != nil {
+		cleanup()
+		return nil, nil, err
+	}
+	rocketMQ := globalConfig.RocketMQ
+	rocketmqClient, cleanup3, err := rocketmq.Open(rocketMQ, db)
+	if err != nil {
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	readiness := newReadiness(db, client, rocketmqClient, set, mySQL)
 	healthService := service.NewHealthService(readiness)
 	httpServer := server.NewHTTPServer(http, healthService)
-	mainApplication := newApplication(log, httpServer)
-	return mainApplication, nil
+	group := emptyRoles()
+	mainApplication := newApplication(http, log, httpServer, group)
+	return mainApplication, func() {
+		cleanup3()
+		cleanup2()
+		cleanup()
+	}, nil
 }
-
-var (
-	_wireReadinessValue = service.Readiness(nil)
-)

@@ -3,6 +3,7 @@ package conf_test
 import (
 	"context"
 	"errors"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -27,8 +28,16 @@ func localConfig(t *testing.T) {
 		"DELIVERY_BACKOFF_INITIAL", "DELIVERY_BACKOFF_CAP", "DELIVERY_SERVER_WAIT_CAP",
 		"DELIVERY_ROUND_DEADLINE", "DELIVERY_BLOCKED_CHECK", "OUTBOX_POLL_INTERVAL",
 		"OUTBOX_GRACE_PERIOD", "RECOVERY_SCAN_INTERVAL", "RETENTION_OVERVIEW_CACHE", "RETENTION_RESOLVED_AFTER",
+		"HTTP_REQUEST_TIMEOUT", "HTTP_SHUTDOWN_TIMEOUT", "HTTP_MAX_HEADER_BYTES",
+		"MYSQL_OPERATION_TIMEOUT", "AUTH_CONFIG_REF", "SUMMARY_MAX_BYTES",
 	} {
 		t.Setenv(key, "")
+	}
+	// 这几项显式为空会启动失败；未设置才使用默认值。
+	for _, key := range []string{"MYSQL_DSN", "REDIS_ADDR", "ROCKETMQ_ENDPOINT", "AUTH_CONFIG_REF"} {
+		if err := os.Unsetenv(key); err != nil {
+			t.Fatal(err)
+		}
 	}
 }
 

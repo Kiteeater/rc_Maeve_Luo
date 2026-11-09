@@ -1,0 +1,14 @@
+{
+  "format_version": 1,
+  "identities": [
+    {
+      "actor_id": "local-dev",
+      "caller_id": "local",
+      "token_sha256": "2ad5244ff6ba93be18fc83acd3e8af62291dccad37b75c6f7b3804a2498adf4b",
+      "allowed_sources": ["demo"],
+      "caller_scopes": ["local"],
+      "permissions": ["events:write", "data:read"],
+      "enabled": true
+    }
+  ]
+}

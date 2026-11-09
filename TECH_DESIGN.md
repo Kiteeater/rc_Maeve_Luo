@@ -33,7 +33,18 @@
 | 迁移与日志 | Goose v3、SQL 迁移、`log/slog` | 显式结构迁移、结构化追踪与脱敏 |
 | 本地环境 | Docker Compose | 应用、MySQL、RocketMQ、Redis、独立模拟供应商 |
 
-实施时锁定具体补丁、依赖和镜像版本，验证 Broker、Proxy 与 SDK 的兼容组合。驱动和客户端参考 [MySQL Go 驱动](https://github.com/go-sql-driver/mysql)、[Apache RocketMQ Go 客户端](https://github.com/apache/rocketmq-clients/tree/master/golang)。
+已在本机 compose 验证的版本组合（2026-11-09）：
+
+| 组件 | 锁定版本 |
+| --- | --- |
+| MySQL 镜像 / Go 驱动 | `mysql:8.4.13` / `github.com/go-sql-driver/mysql` v1.9.3 |
+| Redis 镜像 / 客户端 | `redis:7.4.12-alpine` / `github.com/redis/go-redis/v9` v9.17.2 |
+| RocketMQ 镜像 / Go 客户端 | `apache/rocketmq:5.3.1`（NameServer、Broker、Proxy）/ `github.com/apache/rocketmq-clients/golang/v5` v5.1.4 |
+| 迁移 | `github.com/pressly/goose/v3` v3.26.0，`make migrate-*` 执行 `go run github.com/pressly/goose/v3/cmd/goose`，版本以 `go.mod` 为准 |
+
+即时 Topic `notifier-delivery`（`message.type=NORMAL`）和延迟 Topic `notifier-delivery-delay`（`message.type=DELAY`）由 `make topics` 通过 Broker 内的 `mqadmin updateTopic` 创建。v5.1.4 客户端经本机 Proxy `127.0.0.1:8081` 完成了即时消息与延迟消息的真实收发，本地 Proxy 不启用 ACL。SimpleConsumer 的 await duration 必须落在 Proxy 默认长轮询窗口内；2 秒会得到 `40018 ILLEGAL_POLLING_TIME`，当前客户端使用 15 秒。Broker 使用镜像自带用户时无法写入 root 属主的命名卷，compose 以 `user: 0:0` 运行 Broker，并挂载 `deploy/rocketmq/broker.conf`。
+
+驱动和客户端参考 [MySQL Go 驱动](https://github.com/go-sql-driver/mysql)、[Apache RocketMQ Go 客户端](https://github.com/apache/rocketmq-clients/tree/master/golang)。
 
 RocketMQ 是当前推荐，适用于本次以任务完成、延迟投递和异常恢复为主的链路。Kafka 也可以承载事件；如已有统一 Kafka 基础设施，可重新评估消费进度、重试 Topic 和调度组织方式。外部 HTTP 操作仍需要应用状态及接收方配合，不能靠 MQ 事务保证恰好执行一次。[Kafka 投递语义](https://kafka.apache.org/41/design/design/#message-delivery-semantics)
 
