@@ -371,33 +371,89 @@ worker 发起 HTTP 前再次检查领取有效性，并为请求设置早于领�
 
 ```text
 cmd/
-  notifier/main.go           # 依赖组装与生命周期
+  notifier/
+    main.go                 # 入口、信号与生命周期
+    wire.go                 # 依赖图声明（wireinject 构建标签）
+    wire_gen.go             # Wire 生成，普通构建使用
   mockvendor/main.go         # 独立模拟供应商
 internal/
-  event/                    # 事件接入、数据约定与提交幂等
-  routing/                  # 路由发布快照、匹配与固定分发计划
-  mapping/                  # 受限字段映射及校验
-  deliverytask/             # 单个接收方任务、结果与人工重投
-  mysql/                    # SQL、事务、条件更新
-  outbox/                   # 指令发布与确认
-  rocketmq/                 # MQ 收发与消息协议
-  worker/                   # 任务执行与 ACK 协调
-  recovery/                 # 过期恢复、补发与死信修复
-  adapter/                  # 供应商请求构造与响应解释
-  credential/               # 凭证生命周期
-  channel/                  # 供应商账号与运行约束
-  rediscache/               # 缓存与原子限流
-  httpclient/               # 受控 HTTP 传输
-  httpapi/                  # 认证与输入输出
-  config/                   # 启动配置
-  mockvendor/               # 故障模拟及接收记录
+  conf/                     # 环境变量、Key Vault、GlobalConfig
+  server/
+    http.go                 # HTTP 服务、路由和中间件注册
+    grpc.go                 # 有实际 protobuf 契约后引入
+    worker.go               # 按需增加 MQ 消费和后台任务入口
+  service/                  # HTTP JSON / protobuf 与业务对象转换
+  biz/
+    biz_config/             # 配置发布、路由及映射用例
+    biz_event/              # 受理事件与固定分发计划
+    biz_delivery/           # 任务执行、尝试、预算和人工处置
+    biz_outbox/             # 可靠发布编排
+    biz_provider/           # 凭证生命周期、通道和供应商执行编排
+    biz_recovery/           # 自动恢复编排
+    biz_tracking/           # 查询、概览与保留清理
+  data_interface/           # 仓储与外部能力接口；输入输出只用领域类型
+  data/
+    mysql/                  # SQL、连接池、完整业务事务及条件更新
+    redis/                  # 缓存与原子限流实现
+    rocketmq/               # 消息生产消费 SDK 实现
+    provider/               # 供应商协议适配、受控 HTTP 与凭证存取
+  domain/                   # 业务对象、状态机、路由和映射的纯规则
+  enums/                    # 共享业务枚举
+  constant/                 # 共享常量
+  remote_grpc/              # 按需引入的内部 gRPC 客户端
+  utils/                    # 无业务或基础设施依赖的内部工具
+pkg/                        # 跨模块复用的 errors、metrics、middleware
+unit_test/                  # 镜像 internal 目录的黑盒单元测试
 migrations/
 tests/integration/
 compose.yaml
 Makefile
 ```
 
-目录按实现需要创建，不预建空壳。核心事务以“受理事件并创建全部任务”“结束尝试并安排下一步”等完整操作表达。使用具体结构体、小接口、显式错误分类和有界上下文；适配器不隐藏重试，后台循环均可停止。基础检查采用 `gofmt`、`go vet` 和并发路径 race 检查。
+目录按实现需要创建，不预建空壳。当前已落地 `conf`、`server/http.go`、`service`、Wire 入口与对应黑盒测试，其余为目标位置。保留现有 MySQL、SQL 迁移和 Compose；本次分层调整不切换数据库。`cmd/mockvendor` 是独立测试工具，不为它建立业务分层和依赖图。
+
+### 12.1 分层与依赖规则
+
+```mermaid
+flowchart TB
+    CMD[cmd/notifier: Wire 组装] --> CONF[conf: GlobalConfig]
+    CMD --> SERVER[server: 路由、中间件、后台入口]
+    CMD --> DATA[data: 具体实现]
+    SERVER --> SERVICE[service: 协议转换]
+    SERVICE --> BIZ[biz/biz_*: 用例]
+    SERVER -->|后台入口| BIZ
+    BIZ --> PORT[data_interface: 仓储与外部能力接口]
+    DATA -.->|实现| PORT
+    BIZ --> DOMAIN[domain / enums / constant]
+    PORT --> DOMAIN
+    DATA --> DOMAIN
+    DATA --> DB[(MySQL)]
+```
+
+图中的实线表示代码依赖，虚线表示接口实现。具体实现通过 Wire 注入接口，业务调用沿接口进入 `data`。
+
+- `server` 创建 HTTP / gRPC 服务、注册路由与中间件，不解析业务字段或编写业务规则。MQ 消费、发布器和扫描器入口也只负责生命周期、并发及调用用例，不自己推进任务状态。
+- `service` 处理参数解析、JSON / protobuf 转换和协议错误映射，调用 `biz`；不引用 `data`、数据库驱动或 SDK。不向业务层传递 `http.Request`、protobuf 消息或数据库模型。当前 API 使用 JSON，protobuf 契约建立后再生成 pb 类型并增加 gRPC 服务。
+- `biz/biz_*` 编排业务用例。持久化、缓存、MQ、供应商调用和远程服务均经 `data_interface`，不依赖 `data`、`conf`、协议包或驱动；所需运行参数以明确的构造参数注入。共享状态规则位于 `domain`，恢复与人工处置复用它，避免各写一套状态推进逻辑。
+- `data_interface` 定义小接口，输入输出使用 `context.Context`、领域类型及稳定错误，不暴露 `sql.Tx`、驱动类型或 protobuf。可生成重复的仓储接口，但应提交生成源与生成命令；涉及跨表原子性的业务操作需要显式契约，不能依赖生成的 CRUD 拼装。
+- `data` 是唯一访问数据库的层，同时承载 Redis、RocketMQ、供应商 HTTP 及远程能力的具体实现。`remote_grpc` 只包装内部 RPC 客户端，由 `data` 通过接口适配给业务层，不反向依赖用例。MySQL 模型及行结构保留在实现内部，与 `domain` 显式转换。
+- `domain`、`enums`、`constant` 不依赖协议、配置和基础设施；`utils` 保持纯工具。`pkg` 只接纳已有跨模块复用需求的代码，不依赖项目的 `internal`，不提前建立通用框架。
+
+核心事务以“受理事件并创建全部任务”“结束尝试并安排下一步”等完整操作表达。事件、任务、Outbox、审计与时间线需要原子保存时，由一个仓储方法在 `data/mysql` 开启和提交同一个事务。`biz` 决定业务动作，不自行拼接多次独立 CRUD，也不跨外部 HTTP / MQ 调用持有数据库事务。
+
+### 12.2 启动配置与依赖注入
+
+`conf` 在启动时按默认值、环境变量、Key Vault 密钥的顺序汇总为 `GlobalConfig`。默认值和明文环境变量仅用于本地开发；部署时通过环境变量提供 Vault URL 和密钥名称，实际密钥由 Azure SDK 的 `DefaultAzureCredential` 读取，Azure 上使用托管身份。设置 Vault 后要求 MySQL DSN 密钥引用，Redis 使用密码时也要求其密钥引用；读取失败、空密钥或配置无效时启动失败，不回退到本地凭证。密钥读取有统一超时，日志和错误响应不得包含密钥值。
+
+`GlobalConfig` 是构造时注入的只读配置快照，不是包级可变单例。Wire 按字段向组件注入所需配置，例如 HTTP 服务只接收 `conf.HTTP`，不获得数据库凭证。业务路由、映射和轮次策略仍按已发布版本管理，不从启动配置替换；供应商运行凭证通过受保护的引用读取和刷新，不把所有账号凭证加载到全局配置。
+
+`main.go` 管理信号、启动和停止；`wire.go` 声明依赖图并绑定 `data_interface` 与 `data` 的实现；`wire_gen.go` 由 `make wire` 生成并随代码交付，不手写。构造失败应返回错误，拥有外部连接或后台循环的构造函数提供清理函数，后续组装失败时按逆序释放。适配器不隐藏重试，后台循环均可停止。
+
+### 12.3 测试组织
+
+`unit_test/conf`、`unit_test/server`、`unit_test/service`、`unit_test/biz/biz_*` 等与被测目录对应，使用 `conf_test` 等外部包，只调用导出接口。业务单测注入 `data_interface` 的内存替身、受控时钟和供应商结果，不连接真实数据库或远程服务。当前没有实现的模块不建立占位测试。
+
+MySQL 原子性、唯一键、条件更新、RocketMQ 协议和故障恢复在 `tests/integration` 使用真实依赖验证，不能由黑盒单元测试替代。基础检查采用 `gofmt`、`go test ./...`、`go vet ./...` 和适用的 race 检查；修改依赖图后运行 `make wire` 并确认生成文件同步。
 
 ## 13. 验证与运行基线
 

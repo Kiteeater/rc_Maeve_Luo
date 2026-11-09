@@ -9,7 +9,7 @@ GO       ?= go
 GOOSE    := $(GO) run github.com/pressly/goose/v3/cmd/goose@latest
 MYSQL_DSN ?= notifier:notifier@tcp(127.0.0.1:3306)/notifier?parseTime=true&charset=utf8mb4
 
-.PHONY: build run mockvendor test vet race fmt tidy deps \
+.PHONY: build run mockvendor test vet race fmt tidy deps wire \
         migrate-up migrate-down migrate-status migrate-create \
         compose-up compose-down compose-logs clean
 
@@ -34,7 +34,10 @@ race:
 	$(GO) test -race ./...
 
 fmt:
-	gofmt -w cmd internal
+	gofmt -w cmd internal unit_test
+
+wire:
+	$(GO) tool wire ./cmd/notifier
 
 tidy:
 	$(GO) mod tidy

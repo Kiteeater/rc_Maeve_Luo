@@ -1,8 +1,6 @@
 // 通知服务入口：负责依赖组装与进程生命周期。
 //
-// 本文件只做启动编排：解析配置、初始化结构化日志、启动 HTTP 接入服务，
-// 并监听系统信号实现优雅退出。MySQL / Redis / RocketMQ 连接、Outbox 发布器、
-// 任务消费者与补偿扫描器的组装在对应包实现后在此接入。
+// 依赖图声明在 wire.go，wire_gen.go 由 make wire 生成。
 package main
 
 import (
@@ -15,8 +13,7 @@ import (
 	"syscall"
 	"time"
 
-	"notifier/internal/config"
-	"notifier/internal/httpapi"
+	"notifier/internal/conf"
 )
 
 func main() {
@@ -27,34 +24,30 @@ func main() {
 }
 
 func run() error {
-	cfg, err := config.Load()
+	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
+	defer stop()
+	app, err := initializeApp(ctx)
 	if err != nil {
 		return err
 	}
-	slog.SetDefault(newLogger(cfg.Log))
+	slog.SetDefault(app.logger)
+	return app.run(ctx)
+}
 
-	// TODO(实现阶段)：在此按顺序组装
-	//  - MySQL 连接池与迁移状态校验
-	//  - Redis 客户端与配置缓存
-	//  - RocketMQ 生产/消费客户端
-	//  - Outbox 发布器、worker、补偿扫描器（各自可停止的后台循环）
+type application struct {
+	http   *http.Server
+	logger *slog.Logger
+}
 
-	// ready 用于 /readyz 判定核心依赖是否就绪；待上述依赖接入后补充真实检查。
-	api := httpapi.New(func() error { return nil })
+func newApplication(logConfig conf.Log, srv *http.Server) *application {
+	return &application{http: srv, logger: newLogger(logConfig)}
+}
 
-	srv := &http.Server{
-		Addr:              cfg.HTTP.Addr,
-		Handler:           api.Handler(),
-		ReadHeaderTimeout: 5 * time.Second,
-	}
-
-	ctx, stop := signal.NotifyContext(context.Background(), syscall.SIGINT, syscall.SIGTERM)
-	defer stop()
-
+func (a *application) run(ctx context.Context) error {
 	errCh := make(chan error, 1)
 	go func() {
-		slog.Info("http server listening", "addr", cfg.HTTP.Addr)
-		errCh <- srv.ListenAndServe()
+		a.logger.Info("http server listening", "addr", a.http.Addr)
+		errCh <- a.http.ListenAndServe()
 	}()
 
 	select {
@@ -64,20 +57,21 @@ func run() error {
 		}
 		return nil
 	case <-ctx.Done():
-		slog.Info("shutdown signal received")
+		a.logger.Info("shutdown signal received")
 	}
 
 	shutdownCtx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
 	defer cancel()
-	if err := srv.Shutdown(shutdownCtx); err != nil {
+	if err := a.http.Shutdown(shutdownCtx); err != nil {
+		_ = a.http.Close()
 		return err
 	}
-	slog.Info("notifier stopped")
+	a.logger.Info("notifier stopped")
 	return nil
 }
 
 // newLogger 依据配置构造结构化日志器，输出 JSON（默认）或文本。
-func newLogger(c config.Log) *slog.Logger {
+func newLogger(c conf.Log) *slog.Logger {
 	var level slog.Level
 	switch c.Level {
 	case "debug":

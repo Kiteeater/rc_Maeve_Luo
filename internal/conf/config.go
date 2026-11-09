@@ -1,19 +1,21 @@
-// Package config 定义通知服务的启动配置及其加载方式。
+// Package conf 加载进程启动配置，汇总环境变量与 Azure Key Vault 密钥。
 //
 // 所有运行参数均可通过环境变量覆盖，未设置时使用技术方案第 13 节给出的初始建议值。
 // 配置值在启动时解析，运行期间不可变；需要动态调整的运行参数属于发布快照，
-// 由 routing / channel 等包管理，不经过本包。
-package config
+// 由业务用例管理，不经过本包。GlobalConfig 通过构造函数注入，不使用可变全局变量。
+package conf
 
 import (
+	"context"
 	"fmt"
 	"os"
 	"strconv"
 	"time"
 )
 
-// Config 是进程启动所需的全部配置，按职责分组。
-type Config struct {
+// GlobalConfig 是启动完成后的配置快照，运行期间只读。
+type GlobalConfig struct {
+	KeyVault  KeyVault
 	HTTP      HTTP
 	MySQL     MySQL
 	Redis     Redis
@@ -88,9 +90,10 @@ type Log struct {
 }
 
 // Default 返回技术方案第 13 节给出的初始建议配置。
-func Default() Config {
-	return Config{
-		HTTP: HTTP{Addr: ":8080"},
+func Default() GlobalConfig {
+	return GlobalConfig{
+		KeyVault: KeyVault{Timeout: 15 * time.Second},
+		HTTP:     HTTP{Addr: ":8080"},
 		MySQL: MySQL{
 			DSN: "notifier:notifier@tcp(127.0.0.1:3306)/notifier?parseTime=true&charset=utf8mb4",
 		},
@@ -126,10 +129,18 @@ func Default() Config {
 	}
 }
 
-// Load 以默认值为基础，用环境变量覆盖后返回配置。解析出错时返回可定位的错误。
-func Load() (Config, error) {
+// Load 汇总默认值、环境变量和 Key Vault 密钥。任一来源失败时不返回部分配置。
+func Load(ctx context.Context) (GlobalConfig, error) {
+	return (Loader{}).Load(ctx)
+}
+
+// Load 支持注入密钥读取器；未注入时使用 Azure SDK。
+func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	c := Default()
 
+	c.KeyVault.URL = envStr("AZURE_KEY_VAULT_URL", c.KeyVault.URL)
+	c.KeyVault.MySQLDSNSecret = envStr("MYSQL_DSN_SECRET", c.KeyVault.MySQLDSNSecret)
+	c.KeyVault.RedisPasswordSecret = envStr("REDIS_PASSWORD_SECRET", c.KeyVault.RedisPasswordSecret)
 	c.HTTP.Addr = envStr("HTTP_ADDR", c.HTTP.Addr)
 	c.MySQL.DSN = envStr("MYSQL_DSN", c.MySQL.DSN)
 	c.Redis.Addr = envStr("REDIS_ADDR", c.Redis.Addr)
@@ -143,19 +154,20 @@ func Load() (Config, error) {
 
 	var err error
 	if c.Redis.DB, err = envInt("REDIS_DB", c.Redis.DB); err != nil {
-		return Config{}, err
+		return GlobalConfig{}, err
 	}
 	if c.Delivery.Parallelism, err = envInt("DELIVERY_PARALLELISM", c.Delivery.Parallelism); err != nil {
-		return Config{}, err
+		return GlobalConfig{}, err
 	}
 	if c.Delivery.MaxAttempts, err = envInt("DELIVERY_MAX_ATTEMPTS", c.Delivery.MaxAttempts); err != nil {
-		return Config{}, err
+		return GlobalConfig{}, err
 	}
 
 	durations := []struct {
 		key string
 		dst *time.Duration
 	}{
+		{"AZURE_KEY_VAULT_TIMEOUT", &c.KeyVault.Timeout},
 		{"DELIVERY_HTTP_TIMEOUT", &c.Delivery.HTTPTimeout},
 		{"DELIVERY_LEASE_TIMEOUT", &c.Delivery.LeaseTimeout},
 		{"DELIVERY_MQ_INVISIBLE", &c.Delivery.MQInvisible},
@@ -172,10 +184,13 @@ func Load() (Config, error) {
 	}
 	for _, d := range durations {
 		if *d.dst, err = envDuration(d.key, *d.dst); err != nil {
-			return Config{}, err
+			return GlobalConfig{}, err
 		}
 	}
 
+	if err := l.resolveSecrets(ctx, &c); err != nil {
+		return GlobalConfig{}, err
+	}
 	return c, nil
 }
 

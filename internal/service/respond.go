@@ -1,4 +1,4 @@
-package httpapi
+package service
 
 import (
 	"encoding/json"
@@ -30,11 +30,9 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	_, _ = w.Write(b)
 }
 
-// notImplemented 返回对 /v1 尚未实现接口的统一 501 响应。
-func notImplemented(msg string) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
-		writeJSON(w, http.StatusNotImplemented, errorEnvelope{
-			Error: errorBody{Code: "not_implemented", Message: msg},
-		})
+// NotImplemented 提供业务接口尚未实现时的统一 501 响应。
+func NotImplemented(w http.ResponseWriter, _ *http.Request) {
+	writeJSON(w, http.StatusNotImplemented, errorEnvelope{
+		Error: errorBody{Code: "not_implemented", Message: "接口尚未实现"},
 	})
 }
