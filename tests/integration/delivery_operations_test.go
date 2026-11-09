@@ -4,6 +4,7 @@ package integration_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"sync"
 	"testing"
@@ -35,9 +36,25 @@ func opsReplayInput(t *testing.T, task data_interface.TaskRecord, key, fp string
 	}
 }
 
-func failTask(t *testing.T, task data_interface.TaskRecord) {
+// opsTask 与 s03Task 相同，但允许同一测试内建多个发布版本（s03Task 固定版本 1）。
+func opsTask(t *testing.T, db *sql.DB, sourceID string, version int) data_interface.TaskRecord {
 	t.Helper()
-	db := s02DB(t)
+	releaseID, hash := insertRelease(t, db, version, []byte(`{"v":1}`))
+	accepted := s02UC(t, db, &fixedPlan{id: releaseID, hash: hash, plan: oneTarget(releaseID, "ad-registration")}, openEventLimits())
+	out, err := accepted.Submit(context.Background(), evtPrincipal(), evtJSON("user-service", sourceID, "2026-11-09T09:30:00Z", `{"user_id":"u-1"}`))
+	if err != nil || len(out.Deliveries) != 1 {
+		t.Fatalf("accept %+v %v", out, err)
+	}
+	task, err := mysql.NewDeliveryStore(db, mysql.NewExecutor(db, 2*time.Second)).LoadTask(context.Background(), out.Deliveries[0].DeliveryID)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return task
+}
+
+// failTask 把任务置为 FAILED；不能再调用 s02DB（它会清空数据）。
+func failTask(t *testing.T, db *sql.DB, task data_interface.TaskRecord) {
+	t.Helper()
 	if _, err := db.Exec(`UPDATE delivery_tasks SET status = 'FAILED', row_version = row_version + 1, scheduled_at = NULL WHERE delivery_id = ?`, task.DeliveryID); err != nil {
 		t.Fatal(err)
 	}
@@ -47,7 +64,7 @@ func failTask(t *testing.T, task data_interface.TaskRecord) {
 func TestOPS01_MySQLConcurrentSameKey(t *testing.T) {
 	db := s02DB(t)
 	task, _ := s03Task(t, db, "ops-01-"+time.Now().Format("150405.000000"))
-	failTask(t, task)
+	failTask(t, db, task)
 	store := mysql.NewOperationStore(db, mysql.NewExecutor(db, 2*time.Second))
 	in := opsReplayInput(t, task, "ops01-"+time.Now().Format("150405.000000"), "fp-1")
 	var wg sync.WaitGroup
@@ -75,10 +92,10 @@ func TestOPS01_MySQLConcurrentSameKey(t *testing.T) {
 func TestOPS11_MySQLSameKeyTwoTasks(t *testing.T) {
 	db := s02DB(t)
 	suffix := time.Now().Format("150405.000000")
-	a, _ := s03Task(t, db, "ops-11a-"+suffix)
-	b, _ := s03Task(t, db, "ops-11b-"+suffix)
-	failTask(t, a)
-	failTask(t, b)
+	a := opsTask(t, db, "ops-11a-"+suffix, 1)
+	b := opsTask(t, db, "ops-11b-"+suffix, 2)
+	failTask(t, db, a)
+	failTask(t, db, b)
 	store := mysql.NewOperationStore(db, mysql.NewExecutor(db, 2*time.Second))
 	key := "ops11-" + suffix
 	var wg sync.WaitGroup
