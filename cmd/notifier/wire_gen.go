@@ -68,15 +68,29 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	delivery := globalConfig.Delivery
 	deliveryStore := mysql.NewDeliveryStore(db, executor)
 	unavailableRuntime := provider.NewUnavailableRuntime()
-	pendingSchedule := rocketmq.NewPendingSchedule()
+	outboxStore := mysql.NewOutboxStore(db, executor)
+	outbox := globalConfig.Outbox
+	rescheduler := newRescheduler(outboxStore, outbox)
 	limits := globalConfig.Limits
-	biz_deliveryUseCase := newDeliveryUseCase(deliveryStore, unavailableRuntime, pendingSchedule, delivery, limits)
+	biz_deliveryUseCase := newDeliveryUseCase(deliveryStore, unavailableRuntime, rescheduler, delivery, limits)
 	runner := newDeliveryRunner(biz_deliveryUseCase)
-	idleSource := newIdleSource()
-	worker := server.NewWorker(delivery, http, runner, idleSource)
-	group := newRoles(worker)
+	consumer, cleanup4, err := rocketmq.OpenConsumer(rocketMQ, rocketmqClient)
+	if err != nil {
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	counters := newOutboxCounters()
+	decoder := newDecoder(outboxStore, counters)
+	mqSource := newMQSource(consumer, decoder, delivery)
+	worker := server.NewWorker(delivery, http, runner, mqSource)
+	publisher := newPublisher(outboxStore, rocketmqClient, outbox, rocketMQ, counters)
+	serverPublisher := newPublisherRole(publisher, outbox)
+	group := newRoles(worker, serverPublisher)
 	mainApplication := newApplication(http, log, httpServer, group)
 	return mainApplication, func() {
+		cleanup4()
 		cleanup3()
 		cleanup2()
 		cleanup()

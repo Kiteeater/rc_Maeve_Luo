@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/wire"
 
+	"notifier/internal/biz/biz_outbox"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
 	"notifier/internal/data/provider"
@@ -22,7 +23,7 @@ import (
 func initializeApp(ctx context.Context) (*application, func(), error) {
 	wire.Build(
 		conf.Load,
-		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Log", "Auth", "Config", "Event", "Delivery", "Limits"),
+		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Outbox", "Log", "Auth", "Config", "Event", "Delivery", "Limits"),
 		loadIdentities,
 		mysql.Open,
 		redis.Open,
@@ -46,14 +47,23 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 		server.NewHTTPServer,
 		mysql.NewDeliveryStore,
 		provider.NewUnavailableRuntime,
-		rocketmq.NewPendingSchedule,
+		mysql.NewOutboxStore,
+		wire.Bind(new(data_interface.OutboxStore), new(*mysql.OutboxStore)),
+		wire.Bind(new(data_interface.CommandSender), new(*rocketmq.Client)),
+		rocketmq.OpenConsumer,
+		wire.Bind(new(data_interface.CommandConsumer), new(*rocketmq.Consumer)),
+		newOutboxCounters,
+		newRescheduler,
+		newPublisher,
+		newDecoder,
+		newMQSource,
+		newPublisherRole,
 		wire.Bind(new(data_interface.DeliveryStore), new(*mysql.DeliveryStore)),
 		wire.Bind(new(data_interface.ProviderRuntime), new(*provider.UnavailableRuntime)),
-		wire.Bind(new(data_interface.ScheduleOriginal), new(*rocketmq.PendingSchedule)),
+		wire.Bind(new(data_interface.ScheduleOriginal), new(*biz_outbox.Rescheduler)),
 		newDeliveryUseCase,
 		newDeliveryRunner,
-		newIdleSource,
-		wire.Bind(new(server.Source), new(*server.IdleSource)),
+		wire.Bind(new(server.Source), new(*server.MQSource)),
 		server.NewWorker,
 		newRoles,
 		newApplication,

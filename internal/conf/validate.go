@@ -171,6 +171,45 @@ func validate(c *GlobalConfig) error {
 	if !asciiAlnum(c.Event.IdempotencyNamespace, 1, 24) {
 		return fmt.Errorf("conf: DELIVERY_IDEMPOTENCY_NAMESPACE out of range")
 	}
+	return validateOutbox(c)
+}
+
+// validateOutbox 校验 S04 第 8 节的发布参数及其关系。
+func validateOutbox(c *GlobalConfig) error {
+	o := c.Outbox
+	if err := durationBetween("OUTBOX_POLL_INTERVAL", o.PollInterval, 100*time.Millisecond, 10*time.Second); err != nil {
+		return err
+	}
+	if err := intBetween("OUTBOX_BATCH_SIZE", o.BatchSize, 1, 500); err != nil {
+		return err
+	}
+	if err := intBetween("OUTBOX_PARALLELISM", o.Parallelism, 1, 32); err != nil {
+		return err
+	}
+	if err := durationBetween("OUTBOX_SEND_TIMEOUT", o.SendTimeout, 100*time.Millisecond, 10*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("OUTBOX_LEASE_TIMEOUT", o.LeaseTimeout, 5*time.Second, 120*time.Second); err != nil {
+		return err
+	}
+	if o.LeaseTimeout <= o.SendTimeout+c.MySQL.OperationTimeout+5*time.Second {
+		return fmt.Errorf("conf: OUTBOX_LEASE_TIMEOUT must be > OUTBOX_SEND_TIMEOUT + MYSQL_OPERATION_TIMEOUT + 5s")
+	}
+	if err := durationBetween("OUTBOX_BACKOFF_INITIAL", o.BackoffInitial, 100*time.Millisecond, 10*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("OUTBOX_BACKOFF_CAP", o.BackoffCap, o.BackoffInitial, 10*time.Minute); err != nil {
+		return err
+	}
+	if err := intBetween("ROCKETMQ_MAX_DELIVERY_ATTEMPTS", o.MaxDeliveries, 2, 64); err != nil {
+		return err
+	}
+	if err := durationBetween("ROCKETMQ_CLOCK_SAFETY", o.ClockSafety, 0, 5*time.Second); err != nil {
+		return err
+	}
+	if o.MaxDelay <= o.ClockSafety {
+		return fmt.Errorf("conf: ROCKETMQ_MAX_DELAY must be > ROCKETMQ_CLOCK_SAFETY")
+	}
 	return nil
 }
 

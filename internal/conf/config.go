@@ -116,8 +116,17 @@ type Delivery struct {
 
 // Outbox 可靠发布参数。
 type Outbox struct {
-	PollInterval time.Duration // 空闲轮询，建议 1s
-	GracePeriod  time.Duration // 补发宽限，建议 5m
+	PollInterval   time.Duration // 空闲轮询，建议 1s
+	GracePeriod    time.Duration // 补发宽限，建议 5m
+	BatchSize      int           // 单批领取上限
+	Parallelism    int           // 并行发送上限
+	SendTimeout    time.Duration // 单次 Broker send 预算
+	LeaseTimeout   time.Duration // 发布领取期限
+	BackoffInitial time.Duration // 发布退避起点
+	BackoffCap     time.Duration // 发布退避上限
+	MaxDelay       time.Duration // Broker 支持的最大延迟
+	ClockSafety    time.Duration // 延迟窗口时钟余量
+	MaxDeliveries  int           // Broker 组最大重投次数目标值，不是业务 max_attempts
 }
 
 // Recovery 补偿扫描参数。
@@ -191,8 +200,17 @@ func Default() GlobalConfig {
 			BlockedCheck:           60 * time.Second,
 		},
 		Outbox: Outbox{
-			PollInterval: time.Second,
-			GracePeriod:  5 * time.Minute,
+			PollInterval:   time.Second,
+			GracePeriod:    5 * time.Minute,
+			BatchSize:      100,
+			Parallelism:    4,
+			SendTimeout:    3 * time.Second,
+			LeaseTimeout:   15 * time.Second,
+			BackoffInitial: time.Second,
+			BackoffCap:     time.Minute,
+			MaxDelay:       24 * time.Hour,
+			ClockSafety:    time.Second,
+			MaxDeliveries:  16,
 		},
 		Recovery: Recovery{ScanInterval: 30 * time.Second},
 		Retention: Retention{
@@ -262,6 +280,15 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	}
 
 	if c.Redis.DB, err = envInt("REDIS_DB", c.Redis.DB); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Outbox.BatchSize, err = envInt("OUTBOX_BATCH_SIZE", c.Outbox.BatchSize); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Outbox.Parallelism, err = envInt("OUTBOX_PARALLELISM", c.Outbox.Parallelism); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Outbox.MaxDeliveries, err = envInt("ROCKETMQ_MAX_DELIVERY_ATTEMPTS", c.Outbox.MaxDeliveries); err != nil {
 		return GlobalConfig{}, err
 	}
 	if c.Delivery.Parallelism, err = envInt("DELIVERY_PARALLELISM", c.Delivery.Parallelism); err != nil {
@@ -348,6 +375,12 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"DELIVERY_BLOCKED_CHECK", &c.Delivery.BlockedCheck},
 		{"OUTBOX_POLL_INTERVAL", &c.Outbox.PollInterval},
 		{"OUTBOX_GRACE_PERIOD", &c.Outbox.GracePeriod},
+		{"OUTBOX_SEND_TIMEOUT", &c.Outbox.SendTimeout},
+		{"OUTBOX_LEASE_TIMEOUT", &c.Outbox.LeaseTimeout},
+		{"OUTBOX_BACKOFF_INITIAL", &c.Outbox.BackoffInitial},
+		{"OUTBOX_BACKOFF_CAP", &c.Outbox.BackoffCap},
+		{"ROCKETMQ_MAX_DELAY", &c.Outbox.MaxDelay},
+		{"ROCKETMQ_CLOCK_SAFETY", &c.Outbox.ClockSafety},
 		{"RECOVERY_SCAN_INTERVAL", &c.Recovery.ScanInterval},
 		{"RETENTION_OVERVIEW_CACHE", &c.Retention.OverviewCache},
 		{"RETENTION_RESOLVED_AFTER", &c.Retention.ResolvedAfter},

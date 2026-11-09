@@ -9,6 +9,7 @@ import (
 	"notifier/internal/biz/biz_config"
 	"notifier/internal/biz/biz_delivery"
 	"notifier/internal/biz/biz_event"
+	"notifier/internal/biz/biz_outbox"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
 	"notifier/internal/data/redis"
@@ -96,6 +97,36 @@ func (r deliveryRunner) ExecuteInstruction(ctx context.Context, cmd domain.Deliv
 
 func newDeliveryRunner(uc *biz_delivery.UseCase) server.Runner { return deliveryRunner{uc} }
 
-func newIdleSource() *server.IdleSource { return &server.IdleSource{} }
+func newOutboxCounters() *biz_outbox.Counters { return &biz_outbox.Counters{} }
 
-func newRoles(worker *server.Worker) *server.Group { return server.NewGroup(worker) }
+func newRescheduler(store data_interface.OutboxStore, cfg conf.Outbox) *biz_outbox.Rescheduler {
+	return &biz_outbox.Rescheduler{Store: store, MaxDelay: cfg.MaxDelay, ClockSafety: cfg.ClockSafety}
+}
+
+func newPublisher(store data_interface.OutboxStore, sender data_interface.CommandSender, cfg conf.Outbox, mq conf.RocketMQ, counters *biz_outbox.Counters) *biz_outbox.Publisher {
+	return &biz_outbox.Publisher{
+		Store: store, Sender: sender, Counters: counters,
+		Config: biz_outbox.Config{
+			BatchSize: cfg.BatchSize, Parallelism: cfg.Parallelism, Lease: cfg.LeaseTimeout,
+			SendTimeout: cfg.SendTimeout, BackoffInitial: cfg.BackoffInitial, BackoffCap: cfg.BackoffCap,
+			MaxDelay: cfg.MaxDelay, ClockSafety: cfg.ClockSafety,
+			TopicImmediate: mq.TopicImmediate, TopicDelayed: mq.TopicDelayed, AlertAfter: 5,
+		},
+	}
+}
+
+func newDecoder(store data_interface.OutboxStore, counters *biz_outbox.Counters) *biz_outbox.Decoder {
+	return &biz_outbox.Decoder{Store: store, Counters: counters}
+}
+
+func newMQSource(consumer data_interface.CommandConsumer, dec *biz_outbox.Decoder, cfg conf.Delivery) *server.MQSource {
+	return &server.MQSource{Consumer: consumer, Decoder: dec, Invisible: cfg.MQInvisible}
+}
+
+func newPublisherRole(p *biz_outbox.Publisher, cfg conf.Outbox) *server.Publisher {
+	return &server.Publisher{Runner: p, Interval: cfg.PollInterval, Batch: cfg.BatchSize}
+}
+
+func newRoles(worker *server.Worker, pub *server.Publisher) *server.Group {
+	return server.NewGroup(pub, worker)
+}
