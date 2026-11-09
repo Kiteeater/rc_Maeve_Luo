@@ -172,7 +172,8 @@ func TestDLV16_FinishHistoryRollback(t *testing.T) {
 	}
 	if _, err = db.Exec(`
 		INSERT INTO delivery_history (delivery_id, history_seq, write_id, phase, from_status, to_status, reason, round_no, schedule_version)
-		VALUES (?, 2, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'LATE_RESPONSE', 'PROCESSING', 'PROCESSING', 'blocker', 1, 1)`, task.DeliveryID); err != nil {
+		SELECT delivery_id, history_seq + 1, 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb', 'LATE_RESPONSE', 'PROCESSING', 'PROCESSING', 'blocker', 1, 1
+		FROM delivery_tasks WHERE delivery_id = ?`, task.DeliveryID); err != nil {
 		t.Fatal(err)
 	}
 	_, err = store.FinishAttemptAndPlan(context.Background(), s03Finish(started.Ownership, receivedPlan(time.Now().UTC())))
