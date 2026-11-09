@@ -186,6 +186,8 @@ resolve 按以下顺序校验：
 | `channel_blocked / configuration_unavailable` | 422 | 修复原条件后再提交，不切换目标或适配器 |
 | `operation_unconfirmed` | 503 | 保留原键和全部原参数重试，不能新建操作键绕过 |
 
+> 冲突记录（S07 实现）：`configuration_unavailable` 在 S01 发布读取等接口按依赖不可用映射为 503；本表的 422 仅适用于 `/v1/deliveries/{id}/retry` 与 `/resolve`（原冻结条件不可满足，修复后作为新意图提交），实现按接口覆盖状态码，不改变其他接口。共享错误表新增 `evidence_insufficient / evidence_invalid / channel_blocked`（422）与 `operation_unconfirmed`（503）。
+
 当同键并发事务已经存在成功结果时，优先读取原结果；不能先因 row_version 已变返回 409。唯一键被另一任务相同 caller_scope 的操作占用时，整个当前事务回滚，再按指纹返回原结果或冲突，不留下当前任务的新轮次。
 
 ## 9. 运行与持久化参数

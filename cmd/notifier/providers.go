@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"notifier/internal/biz/biz_operations"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -160,4 +161,19 @@ func newProviderRuntime(reg data_interface.AdapterRegistry, ch data_interface.Ch
 			SummaryMax: limits.SummaryBytes, LimiterRetry: time.Second,
 		},
 	}
+}
+
+// newOperations 组装 S07 人工操作用例。
+func newOperations(tasks data_interface.DeliveryStore, ops data_interface.OperationStore, cc data_interface.ConstraintChecker, o conf.Operations, d conf.Delivery) *biz_operations.UseCase {
+	return &biz_operations.UseCase{
+		Tasks: tasks, Ops: ops, Constraints: cc,
+		Config: biz_operations.Config{
+			MaxEvidenceAttempts: o.MaxEvidenceAttempts, ConfirmTimeout: o.ConfirmTimeout,
+			MaxAllowedAttempts: uint32(d.MaxAllowedAttempts), MaxRoundTimeout: d.MaxAllowedRoundTimeout,
+		},
+	}
+}
+
+func newOperationService(uc *biz_operations.UseCase, o conf.Operations) *service.OperationService {
+	return service.NewOperationService(uc, o.MaxBodyBytes)
 }

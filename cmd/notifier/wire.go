@@ -24,7 +24,7 @@ import (
 func initializeApp(ctx context.Context) (*application, func(), error) {
 	wire.Build(
 		conf.Load,
-		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Outbox", "Provider", "Recovery", "Log", "Auth", "Config", "Event", "Delivery", "Limits"),
+		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Outbox", "Provider", "Recovery", "Operations", "Log", "Auth", "Config", "Event", "Delivery", "Limits"),
 		loadIdentities,
 		mysql.Open,
 		redis.Open,
@@ -49,6 +49,10 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 		mysql.NewDeliveryStore,
 		newProviderRuntime,
 		newRecoverer,
+		newOperations,
+		newOperationService,
+		mysql.NewOperationStore,
+		wire.Bind(new(data_interface.OperationStore), new(*mysql.OperationStore)),
 		newRecoveryRole,
 		mysql.NewRecoveryStore,
 		wire.Bind(new(data_interface.RecoveryStore), new(*mysql.RecoveryStore)),

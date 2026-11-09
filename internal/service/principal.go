@@ -8,6 +8,7 @@ type Principal struct {
 	CallerID       string
 	AllowedSources []string
 	Scopes         []string
+	Permissions    []string
 }
 
 type principalKey struct{}

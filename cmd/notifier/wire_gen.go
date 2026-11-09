@@ -64,9 +64,8 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	event := globalConfig.Event
 	biz_eventUseCase := newEventUseCase(eventStore, releaseStore, useCase, event)
 	eventService := newEventService(biz_eventUseCase, event)
-	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, set)
-	delivery := globalConfig.Delivery
 	deliveryStore := mysql.NewDeliveryStore(db, executor)
+	operationStore := mysql.NewOperationStore(db, executor)
 	providerStore := mysql.NewProviderStore(db)
 	rateLimiter := redis.NewRateLimiter(client)
 	confProvider := globalConfig.Provider
@@ -82,8 +81,13 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 		Secrets: fileSecrets,
 	}
 	transport := provider.NewTransport(confProvider, fileSecrets)
+	delivery := globalConfig.Delivery
 	limits := globalConfig.Limits
 	runtime := newProviderRuntime(registry, providerStore, rateLimiter, resolver, transport, delivery, confProvider, limits)
+	operations := globalConfig.Operations
+	biz_operationsUseCase := newOperations(deliveryStore, operationStore, runtime, operations, delivery)
+	operationService := newOperationService(biz_operationsUseCase, operations)
+	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, operationService, set)
 	outboxStore := mysql.NewOutboxStore(db, executor)
 	outbox := globalConfig.Outbox
 	rescheduler := newRescheduler(outboxStore, outbox)

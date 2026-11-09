@@ -27,6 +27,7 @@ func requirePermission(set *auth.Set, permission string, next http.Handler) http
 		principal := service.Principal{
 			ActorID: ctx.ActorID, CallerID: ctx.CallerID,
 			AllowedSources: ctx.AllowedSources, Scopes: ctx.CallerScopes,
+			Permissions: append([]string(nil), ctx.Permissions...),
 		}
 		next.ServeHTTP(w, r.WithContext(service.WithPrincipal(r.Context(), principal)))
 	})

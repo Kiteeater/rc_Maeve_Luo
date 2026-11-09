@@ -127,3 +127,17 @@ const (
 	ErrRecoveryManualRequired = "RECOVERY_MANUAL_REQUIRED"
 	ErrDLQInvalid             = "DLQ_INVALID_MESSAGE"
 )
+
+// S07 人工操作类型与错误码。
+const (
+	OpManualRetry = "manual_retry"
+	OpResolve     = "resolve"
+
+	CodeUnsafeReplay          = "unsafe_replay"
+	CodeEvidenceInsufficient  = "evidence_insufficient"
+	CodeEvidenceInvalid       = "evidence_invalid"
+	CodeChannelBlocked        = "channel_blocked"
+	CodeOperationUnconfirmed  = "operation_unconfirmed"
+	OperationFingerprintV1    = 1
+	RiskCategoryDuplicateExec = "POSSIBLE_DUPLICATE_EXECUTION"
+)

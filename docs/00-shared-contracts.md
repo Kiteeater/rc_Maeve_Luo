@@ -147,9 +147,9 @@ HTTP 截止时间必须早于领取到期，并为结果事务留出余量。MQ 
 | 404 | 不存在或无读取范围：`not_found`，不泄露其他调用方资源 |
 | 409 | 幂等参数冲突、版本或状态冲突：`idempotency_conflict`、`version_conflict`、`state_conflict` |
 | 413 | 请求超过上限：`payload_too_large` |
-| 422 | 业务数据或配置不满足契约：`unsupported_schema`、`no_matching_route`、`mapping_invalid`、`unsafe_replay` |
+| 422 | 业务数据或配置不满足契约：`unsupported_schema`、`no_matching_route`、`mapping_invalid`、`unsafe_replay`、`evidence_insufficient`、`evidence_invalid`、`channel_blocked`（S07 人工操作接口的 `configuration_unavailable` 同为 422） |
 | 429 | 接入级配额限制：`rate_limited` |
-| 503 | 依赖不可用或积压保护：`dependency_unavailable`、`admission_paused` |
+| 503 | 依赖不可用或积压保护：`dependency_unavailable`、`admission_paused`、`operation_unconfirmed` |
 | 500 | 未预期内部错误：`internal`；不返回 SQL、凭证或内部堆栈 |
 
 JSON 必须是一个完整对象，拒绝重复键、尾随数据及无效 UTF-8。请求 envelope 中的未知字段拒绝；事件 `data` 的字段由其数据版本决定。

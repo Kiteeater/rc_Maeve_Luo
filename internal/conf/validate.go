@@ -177,6 +177,9 @@ func validate(c *GlobalConfig) error {
 	if err := validateRecovery(c); err != nil {
 		return err
 	}
+	if err := validateOperations(c.Operations); err != nil {
+		return err
+	}
 	return validateOutbox(c)
 }
 
@@ -311,4 +314,18 @@ func validateRecovery(c *GlobalConfig) error {
 		}
 	}
 	return nil
+}
+
+// validateOperations 校验 S07 第 9 节参数。
+func validateOperations(o Operations) error {
+	if err := intBetween("OPERATIONS_MAX_BODY_BYTES", o.MaxBodyBytes, 4<<10, 64<<10); err != nil {
+		return err
+	}
+	if err := intBetween("OPERATIONS_MAX_EVIDENCE_ATTEMPTS", o.MaxEvidenceAttempts, 1, 1024); err != nil {
+		return err
+	}
+	if err := durationBetween("OPERATIONS_TIMEOUT", o.Timeout, time.Second, 15*time.Second); err != nil {
+		return err
+	}
+	return durationBetween("OPERATIONS_CONFIRM_TIMEOUT", o.ConfirmTimeout, 100*time.Millisecond, 5*time.Second)
 }

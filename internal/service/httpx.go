@@ -39,6 +39,10 @@ const (
 	CodeEventDataInvalid         = "event_data_invalid"
 	CodeFanoutExceeded           = "fanout_exceeded"
 	CodeAcceptanceUnconfirmed    = "acceptance_unconfirmed"
+	CodeEvidenceInsufficient     = "evidence_insufficient"
+	CodeEvidenceInvalid          = "evidence_invalid"
+	CodeChannelBlocked           = "channel_blocked"
+	CodeOperationUnconfirmed     = "operation_unconfirmed"
 )
 
 // StatusOf 返回稳定错误码对应的 HTTP 状态。
@@ -58,11 +62,12 @@ func StatusOf(code string) int {
 		return http.StatusRequestEntityTooLarge
 	case CodeUnsupportedMediaType:
 		return http.StatusUnsupportedMediaType
-	case CodeUnsupportedSchema, CodeEventDataInvalid, CodeNoMatchingRoute, CodeMappingInvalid, CodeFanoutExceeded, CodeUnsafeReplay, CodeConfigInvalid, CodeLimitExceeded:
+	case CodeUnsupportedSchema, CodeEventDataInvalid, CodeNoMatchingRoute, CodeMappingInvalid, CodeFanoutExceeded, CodeUnsafeReplay, CodeConfigInvalid, CodeLimitExceeded,
+		CodeEvidenceInsufficient, CodeEvidenceInvalid, CodeChannelBlocked:
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
-	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeAcceptanceUnconfirmed, CodeConfigurationUnavailable, CodePlanTimeout:
+	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeAcceptanceUnconfirmed, CodeConfigurationUnavailable, CodePlanTimeout, CodeOperationUnconfirmed:
 		return http.StatusServiceUnavailable
 	case CodeNotImplemented:
 		return http.StatusNotImplemented
@@ -91,6 +96,11 @@ type detailBody struct {
 
 // WriteError 按领域错误写出 envelope。message 使用领域错误里的安全文本。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
+	writeErrorStatus(w, r, err, StatusOf)
+}
+
+// writeErrorStatus 允许接口按自身契约覆盖个别错误码的 HTTP 状态。
+func writeErrorStatus(w http.ResponseWriter, r *http.Request, err error, statusOf func(string) int) {
 	var de *domain.Error
 	if !errors.As(err, &de) || de == nil {
 		de = &domain.Error{Code: CodeInternal, Message: "内部错误"}
@@ -109,7 +119,7 @@ func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 			body.Details[i] = detailBody{FieldPath: item.FieldPath, Code: item.Code, Message: item.Message}
 		}
 	}
-	writeJSON(w, StatusOf(code), errorEnvelope{Error: body})
+	writeJSON(w, statusOf(code), errorEnvelope{Error: body})
 }
 
 // CheckContentType 只接受 application/json，可选 charset=utf-8。

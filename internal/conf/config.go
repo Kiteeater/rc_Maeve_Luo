@@ -16,21 +16,22 @@ import (
 
 // GlobalConfig 是启动完成后的配置快照，运行期间只读。
 type GlobalConfig struct {
-	KeyVault  KeyVault
-	HTTP      HTTP
-	MySQL     MySQL
-	Redis     Redis
-	RocketMQ  RocketMQ
-	Delivery  Delivery
-	Outbox    Outbox
-	Provider  Provider
-	Recovery  Recovery
-	Retention Retention
-	Log       Log
-	Auth      Auth
-	Limits    Limits
-	Config    Config
-	Event     Event
+	KeyVault   KeyVault
+	HTTP       HTTP
+	MySQL      MySQL
+	Redis      Redis
+	RocketMQ   RocketMQ
+	Delivery   Delivery
+	Outbox     Outbox
+	Provider   Provider
+	Recovery   Recovery
+	Operations Operations
+	Retention  Retention
+	Log        Log
+	Auth       Auth
+	Limits     Limits
+	Config     Config
+	Event      Event
 }
 
 // Event 是 S02 受理入口的启动上限。业务用例使用注入后的副本，不读环境变量。
@@ -145,6 +146,14 @@ type Outbox struct {
 	MaxDeliveries  int           // Broker 组最大重投次数目标值，不是业务 max_attempts
 }
 
+// Operations 是 S07 人工操作参数。
+type Operations struct {
+	MaxBodyBytes        int
+	MaxEvidenceAttempts int
+	Timeout             time.Duration
+	ConfirmTimeout      time.Duration
+}
+
 // Recovery 补偿扫描参数。
 type Recovery struct {
 	ScanInterval   time.Duration // 补偿扫描，建议 30s
@@ -252,6 +261,7 @@ func Default() GlobalConfig {
 			MaxGrace: 30 * time.Minute, RepairCooldown: 5 * time.Minute, MaxRepairs: 12, ErrorBackoff: 5 * time.Second,
 			DLQAutoRepairs: 3,
 		},
+		Operations: Operations{MaxBodyBytes: 16 << 10, MaxEvidenceAttempts: 256, Timeout: 5 * time.Second, ConfirmTimeout: 2 * time.Second},
 		Retention: Retention{
 			OverviewCache: 5 * time.Second,
 			ResolvedAfter: 30 * 24 * time.Hour,
@@ -332,6 +342,8 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"RECOVERY_PARALLELISM", &c.Recovery.Parallelism},
 		{"RECOVERY_MAX_REPAIRS", &c.Recovery.MaxRepairs},
 		{"RECOVERY_DLQ_AUTO_REPAIRS", &c.Recovery.DLQAutoRepairs},
+		{"OPERATIONS_MAX_BODY_BYTES", &c.Operations.MaxBodyBytes},
+		{"OPERATIONS_MAX_EVIDENCE_ATTEMPTS", &c.Operations.MaxEvidenceAttempts},
 	} {
 		if *it.dst, err = envInt(it.key, *it.dst); err != nil {
 			return GlobalConfig{}, err
@@ -448,6 +460,8 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"RECOVERY_MAX_GRACE", &c.Recovery.MaxGrace},
 		{"RECOVERY_REPAIR_COOLDOWN", &c.Recovery.RepairCooldown},
 		{"RECOVERY_ERROR_BACKOFF", &c.Recovery.ErrorBackoff},
+		{"OPERATIONS_TIMEOUT", &c.Operations.Timeout},
+		{"OPERATIONS_CONFIRM_TIMEOUT", &c.Operations.ConfirmTimeout},
 		{"RETENTION_OVERVIEW_CACHE", &c.Retention.OverviewCache},
 		{"RETENTION_RESOLVED_AFTER", &c.Retention.ResolvedAfter},
 		{"CONFIG_CALCULATION_TIMEOUT", &c.Config.CalculationTimeout},

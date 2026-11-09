@@ -470,7 +470,7 @@ func newHTTP(t *testing.T, uc *biz_config.UseCase) http.Handler {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), service.NewReleaseService(uc, 1<<20), nil, set).Handler
+	return server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), service.NewReleaseService(uc, 1<<20), nil, nil, set).Handler
 }
 
 func doJSON(t *testing.T, handler http.Handler, method, path, body string) *httptest.ResponseRecorder {
