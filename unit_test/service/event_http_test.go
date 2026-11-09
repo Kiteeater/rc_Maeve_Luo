@@ -66,7 +66,7 @@ func eventHandler(t *testing.T, maxBody int) (http.Handler, *httpRepo) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	return server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), nil, service.NewEventService(uc, maxBody), nil, set).Handler, repo
+	return server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), nil, service.NewEventService(uc, maxBody), nil, nil, set).Handler, repo
 }
 
 func post(handler http.Handler, path, body, token string) *httptest.ResponseRecorder {

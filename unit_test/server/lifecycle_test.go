@@ -16,7 +16,7 @@ import (
 )
 
 func TestRequestIDAndUnsupportedMediaType(t *testing.T) {
-	srv := server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), nil, nil, nil, nil)
+	srv := server.NewHTTPServer(conf.Default().HTTP, service.NewHealthService(nil), nil, nil, nil, nil, nil)
 	rec, req := newPost(t, "/v1/events", "")
 	srv.Handler.ServeHTTP(rec, req)
 	if rec.Code != http.StatusUnsupportedMediaType {
@@ -49,7 +49,7 @@ func TestMaxHeaderBytes(t *testing.T) {
 	cfg := conf.Default().HTTP
 	cfg.MaxHeaderBytes = 1024
 	cfg.RequestTimeout = time.Second
-	srv := server.NewHTTPServer(cfg, service.NewHealthService(nil), nil, nil, nil, nil)
+	srv := server.NewHTTPServer(cfg, service.NewHealthService(nil), nil, nil, nil, nil, nil)
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)

@@ -8,7 +8,14 @@ type Readiness func() error
 
 // HealthService 提供 HTTP 健康检查的协议响应。
 type HealthService struct {
-	ready Readiness
+	ready  Readiness
+	report ReadinessReporter
+}
+
+// WithReport 启用分组件就绪报告（S08 TRK-O03）。
+func (s *HealthService) WithReport(r ReadinessReporter) *HealthService {
+	s.report = r
+	return s
 }
 
 func NewHealthService(ready Readiness) *HealthService {
@@ -22,7 +29,19 @@ func (s *HealthService) Healthz(w http.ResponseWriter, _ *http.Request) {
 	writeJSON(w, http.StatusOK, map[string]string{"status": "ok"})
 }
 
-func (s *HealthService) Readyz(w http.ResponseWriter, _ *http.Request) {
+func (s *HealthService) Readyz(w http.ResponseWriter, r *http.Request) {
+	if s.report != nil {
+		rep := s.report(r.Context())
+		body := map[string]any{"components": rep.Components}
+		if rep.Ready {
+			body["status"], body["admission"] = "ready", rep.Admission
+			writeJSON(w, http.StatusOK, body)
+			return
+		}
+		body["status"], body["admission"], body["reason_code"] = "not_ready", rep.Admission, rep.ReasonCode
+		writeJSON(w, http.StatusServiceUnavailable, body)
+		return
+	}
 	if err := s.ready(); err != nil {
 		// 探针响应不暴露连接信息或底层错误。
 		writeJSON(w, http.StatusServiceUnavailable, map[string]string{

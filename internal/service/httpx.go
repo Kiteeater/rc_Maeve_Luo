@@ -39,6 +39,7 @@ const (
 	CodeEventDataInvalid         = "event_data_invalid"
 	CodeFanoutExceeded           = "fanout_exceeded"
 	CodeAcceptanceUnconfirmed    = "acceptance_unconfirmed"
+	CodeQueryTimeout             = "query_timeout"
 	CodeEvidenceInsufficient     = "evidence_insufficient"
 	CodeEvidenceInvalid          = "evidence_invalid"
 	CodeChannelBlocked           = "channel_blocked"
@@ -67,7 +68,7 @@ func StatusOf(code string) int {
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
-	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeAcceptanceUnconfirmed, CodeConfigurationUnavailable, CodePlanTimeout, CodeOperationUnconfirmed:
+	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeAcceptanceUnconfirmed, CodeConfigurationUnavailable, CodePlanTimeout, CodeOperationUnconfirmed, CodeQueryTimeout:
 		return http.StatusServiceUnavailable
 	case CodeNotImplemented:
 		return http.StatusNotImplemented

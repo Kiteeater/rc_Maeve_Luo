@@ -524,7 +524,23 @@ func lockTask(ctx context.Context, tx *sql.Tx, deliveryID uint64) (data_interfac
 }
 
 func loadTask(ctx context.Context, tx *sql.Tx, deliveryID uint64) (data_interface.TaskRecord, error) {
-	row := tx.QueryRowContext(ctx, `
+	rec, err := scanTask(tx.QueryRowContext(ctx, taskSelect+` WHERE t.delivery_id = ?`, deliveryID))
+	if err != nil {
+		return data_interface.TaskRecord{}, err
+	}
+	rec.Attempts, err = loadAttempts(ctx, tx, deliveryID)
+	if err != nil {
+		return data_interface.TaskRecord{}, err
+	}
+	rec.History, err = loadHistory(ctx, tx, deliveryID)
+	if err != nil {
+		return data_interface.TaskRecord{}, err
+	}
+	return rec, nil
+}
+
+// taskSelect 是任务快照的统一列与连接；scanTask 与之一一对应。
+const taskSelect = `
 		SELECT t.delivery_id, t.event_id, e.caller_id, t.route_target_id, t.channel_id, c.row_version, e.routing_release_id,
 			t.provider_id, t.provider_account_id, t.operation, t.adapter_type, t.adapter_version, t.mapping_id, t.mapping_version,
 			t.fixed_target, t.payload_canonical, t.round_policy, t.idempotency_key, t.status, t.result_certainty, t.last_result_certainty,
@@ -538,8 +554,9 @@ func loadTask(ctx context.Context, tx *sql.Tx, deliveryID uint64) (data_interfac
 				ORDER BY o.outbox_id DESC LIMIT 1)
 		FROM delivery_tasks t
 		JOIN business_events e ON e.event_id = t.event_id
-		JOIN channels c ON c.channel_id = t.channel_id
-		WHERE t.delivery_id = ?`, deliveryID)
+		JOIN channels c ON c.channel_id = t.channel_id`
+
+func scanTask(row rowScanner) (data_interface.TaskRecord, error) {
 	var rec data_interface.TaskRecord
 	var fixed, payload, policy, unresolved []byte
 	var lastCert, leaseToken, blockedReason, resumeStatus, lastCode, lastReason, riskOp sql.NullString
@@ -586,14 +603,6 @@ func loadTask(ctx context.Context, tx *sql.Tx, deliveryID uint64) (data_interfac
 		rec.OutboxID = uint64(outbox.Int64)
 	}
 	rec.Unresolved, err = unmarshalUnresolved(string(unresolved))
-	if err != nil {
-		return data_interface.TaskRecord{}, err
-	}
-	rec.Attempts, err = loadAttempts(ctx, tx, deliveryID)
-	if err != nil {
-		return data_interface.TaskRecord{}, err
-	}
-	rec.History, err = loadHistory(ctx, tx, deliveryID)
 	if err != nil {
 		return data_interface.TaskRecord{}, err
 	}

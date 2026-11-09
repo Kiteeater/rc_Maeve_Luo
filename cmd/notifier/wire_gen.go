@@ -87,7 +87,13 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	operations := globalConfig.Operations
 	biz_operationsUseCase := newOperations(deliveryStore, operationStore, runtime, operations, delivery)
 	operationService := newOperationService(biz_operationsUseCase, operations)
-	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, operationService, set)
+	trackingStore := mysql.NewTrackingStore(db)
+	overviewCache := redis.NewOverviewCache(client)
+	tracking := globalConfig.Tracking
+	retention := globalConfig.Retention
+	query := newTrackingQuery(trackingStore, overviewCache, tracking, retention)
+	trackingService := service.NewTrackingService(query)
+	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, operationService, trackingService, set)
 	outboxStore := mysql.NewOutboxStore(db, executor)
 	outbox := globalConfig.Outbox
 	rescheduler := newRescheduler(outboxStore, outbox)
@@ -110,7 +116,10 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	recovery := globalConfig.Recovery
 	recoverer := newRecoverer(recoveryStore, runtime, recovery, outbox, delivery)
 	serverRecovery := newRecoveryRole(recoverer, recovery)
-	group := newRoles(worker, serverPublisher, serverRecovery)
+	retentionStore := mysql.NewRetentionStore(db, executor)
+	cleaner := newCleaner(retentionStore, retention)
+	serverRetention := newRetentionRole(cleaner, retention)
+	group := newRoles(worker, serverPublisher, serverRecovery, serverRetention)
 	mainApplication := newApplication(http, log, httpServer, group)
 	return mainApplication, func() {
 		cleanup4()

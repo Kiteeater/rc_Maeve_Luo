@@ -180,6 +180,9 @@ func validate(c *GlobalConfig) error {
 	if err := validateOperations(c.Operations); err != nil {
 		return err
 	}
+	if err := validateTracking(c.Tracking, c.Retention); err != nil {
+		return err
+	}
 	return validateOutbox(c)
 }
 
@@ -328,4 +331,43 @@ func validateOperations(o Operations) error {
 		return err
 	}
 	return durationBetween("OPERATIONS_CONFIRM_TIMEOUT", o.ConfirmTimeout, 100*time.Millisecond, 5*time.Second)
+}
+
+// validateTracking 校验 S08 第 9 节参数。TRACKING_CURSOR_KEY_REF 缺失不阻止启动，但查询不就绪。
+func validateTracking(t Tracking, r Retention) error {
+	if err := intBetween("TRACKING_MAX_PAGE_SIZE", t.MaxPageSize, 1, 100); err != nil {
+		return err
+	}
+	if err := intBetween("TRACKING_DEFAULT_PAGE_SIZE", t.DefaultPageSize, 1, t.MaxPageSize); err != nil {
+		return err
+	}
+	if err := durationBetween("TRACKING_MAX_WINDOW", t.MaxWindow, time.Hour, 744*time.Hour); err != nil {
+		return err
+	}
+	for _, d := range []struct {
+		name     string
+		v        time.Duration
+		min, max time.Duration
+	}{
+		{"TRACKING_DEFAULT_WINDOW", t.DefaultWindow, time.Hour, t.MaxWindow},
+		{"TRACKING_CURSOR_TTL", t.CursorTTL, 5 * time.Minute, 24 * time.Hour},
+		{"TRACKING_QUERY_TIMEOUT", t.QueryTimeout, 100 * time.Millisecond, 5 * time.Second},
+		{"TRACKING_PROBE_TIMEOUT", t.ProbeTimeout, 100 * time.Millisecond, 2 * time.Second},
+		{"TRACKING_ALERT_BLOCKED_AFTER", t.BlockedAlert, time.Minute, 24 * time.Hour},
+		{"TRACKING_ALERT_UNKNOWN_AFTER", t.UnknownAlert, time.Minute, 24 * time.Hour},
+		{"RETENTION_OVERVIEW_CACHE", r.OverviewCache, 0, 60 * time.Second},
+		{"RETENTION_RESOLVED_AFTER", r.ResolvedAfter, 24 * time.Hour, 8760 * time.Hour},
+		{"RETENTION_SCAN_INTERVAL", r.ScanInterval, time.Minute, 24 * time.Hour},
+	} {
+		if err := durationBetween(d.name, d.v, d.min, d.max); err != nil {
+			return err
+		}
+	}
+	if err := intBetween("TRACKING_OVERVIEW_PARALLELISM", t.OverviewParallelism, 1, 10); err != nil {
+		return err
+	}
+	if err := intBetween("RETENTION_BATCH_EVENTS", r.BatchEvents, 1, 500); err != nil {
+		return err
+	}
+	return intBetween("RETENTION_MAX_ROWS_PER_EVENT", r.MaxRowsPerEvent, 100, 50000)
 }

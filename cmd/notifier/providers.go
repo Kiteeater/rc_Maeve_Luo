@@ -4,6 +4,8 @@ import (
 	"context"
 	"database/sql"
 	"notifier/internal/biz/biz_operations"
+	"notifier/internal/biz/biz_tracking"
+	"notifier/internal/data/cursorkeys"
 	"time"
 
 	goredis "github.com/redis/go-redis/v9"
@@ -131,8 +133,8 @@ func newPublisherRole(p *biz_outbox.Publisher, cfg conf.Outbox) *server.Publishe
 	return &server.Publisher{Runner: p, Interval: cfg.PollInterval, Batch: cfg.BatchSize}
 }
 
-func newRoles(worker *server.Worker, pub *server.Publisher, rec *server.Recovery) *server.Group {
-	return server.NewGroup(pub, worker, rec)
+func newRoles(worker *server.Worker, pub *server.Publisher, rec *server.Recovery, ret *server.Retention) *server.Group {
+	return server.NewGroup(pub, worker, rec, ret)
 }
 
 // newRecoverer 组装 S06 恢复用例。
@@ -176,4 +178,28 @@ func newOperations(tasks data_interface.DeliveryStore, ops data_interface.Operat
 
 func newOperationService(uc *biz_operations.UseCase, o conf.Operations) *service.OperationService {
 	return service.NewOperationService(uc, o.MaxBodyBytes)
+}
+
+// newTrackingQuery 组装 S08 查询用例。Broker 全局指标暂未接入，概览中标记 unavailable。
+func newTrackingQuery(store data_interface.TrackingStore, cache *redis.OverviewCache, t conf.Tracking, r conf.Retention) *biz_tracking.Query {
+	keys := &cursorkeys.Source{Path: t.CursorKeyRef}
+	return &biz_tracking.Query{
+		Store: store, Keys: keys.Load, Cache: cache,
+		Config: biz_tracking.Config{
+			Limits: domain.TrackingLimits{DefaultPageSize: t.DefaultPageSize, MaxPageSize: t.MaxPageSize,
+				DefaultWindow: t.DefaultWindow, MaxWindow: t.MaxWindow, CursorTTL: t.CursorTTL},
+			QueryTimeout: t.QueryTimeout, OverviewCacheTTL: r.OverviewCache, OverviewParallelism: t.OverviewParallelism,
+			BlockedAfter: t.BlockedAlert, UnknownAfter: t.UnknownAlert,
+		},
+	}
+}
+
+// newCleaner 组装 S08 协调清理。
+func newCleaner(store data_interface.RetentionStore, r conf.Retention) *biz_tracking.Cleaner {
+	return &biz_tracking.Cleaner{Store: store, Counters: &biz_tracking.RetentionCounters{},
+		Config: biz_tracking.RetentionConfig{ResolvedAfter: r.ResolvedAfter, BatchEvents: r.BatchEvents, MaxRowsPerEvent: r.MaxRowsPerEvent}}
+}
+
+func newRetentionRole(c *biz_tracking.Cleaner, r conf.Retention) *server.Retention {
+	return &server.Retention{Runner: c, Interval: r.ScanInterval}
 }

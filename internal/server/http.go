@@ -12,7 +12,7 @@ import (
 
 // NewHTTPServer 只组装 HTTP 传输，不承载协议转换或业务规则。
 // releases 为空时只保留健康检查和未实现的 /v1/ 入口。
-func NewHTTPServer(cfg conf.HTTP, health *service.HealthService, releases *service.ReleaseService, events *service.EventService, ops *service.OperationService, identities *auth.Set) *http.Server {
+func NewHTTPServer(cfg conf.HTTP, health *service.HealthService, releases *service.ReleaseService, events *service.EventService, ops *service.OperationService, tracking *service.TrackingService, identities *auth.Set) *http.Server {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /healthz", health.Healthz)
 	mux.HandleFunc("GET /readyz", health.Readyz)
@@ -32,6 +32,18 @@ func NewHTTPServer(cfg conf.HTTP, health *service.HealthService, releases *servi
 	if ops != nil {
 		mux.Handle("POST /v1/deliveries/{id}/retry", requirePermission(identities, constant.PermDeliveriesRetry, RequireJSON(http.HandlerFunc(ops.Retry))))
 		mux.Handle("POST /v1/deliveries/{id}/resolve", requirePermission(identities, constant.PermDeliveriesResolve, RequireJSON(http.HandlerFunc(ops.Resolve))))
+	}
+	if tracking != nil {
+		read := func(h http.HandlerFunc) http.Handler {
+			return requireAnyPermission(identities, []string{constant.PermDataRead, constant.PermOpsRead}, h)
+		}
+		mux.Handle("GET /v1/events", read(tracking.Events))
+		mux.Handle("GET /v1/events/{id}", read(tracking.Event))
+		mux.Handle("GET /v1/deliveries", read(tracking.Deliveries))
+		mux.Handle("GET /v1/deliveries/{id}", read(tracking.Delivery))
+		mux.Handle("GET /v1/deliveries/{id}/attempts", read(tracking.Attempts))
+		mux.Handle("GET /v1/deliveries/{id}/history", read(tracking.History))
+		mux.Handle("GET /v1/overview", read(tracking.Overview))
 	}
 	mux.Handle("/v1/", RequireJSON(http.HandlerFunc(service.NotImplemented)))
 	return &http.Server{

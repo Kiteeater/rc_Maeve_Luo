@@ -9,6 +9,11 @@ import (
 )
 
 func requirePermission(set *auth.Set, permission string, next http.Handler) http.Handler {
+	return requireAnyPermission(set, []string{permission}, next)
+}
+
+// requireAnyPermission 要求至少一项权限；范围仍由下游按 caller_scopes 检查。
+func requireAnyPermission(set *auth.Set, permissions []string, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token, err := auth.BearerToken(r.Header.Get("Authorization"))
 		if err != nil || set == nil {
@@ -20,7 +25,11 @@ func requirePermission(set *auth.Set, permission string, next http.Handler) http
 			service.WriteError(w, r, authErr(service.CodeUnauthenticated, "未认证"))
 			return
 		}
-		if !ctx.Allows(permission) {
+		allowed := false
+		for _, p := range permissions {
+			allowed = allowed || ctx.Allows(p)
+		}
+		if !allowed {
 			service.WriteError(w, r, authErr(service.CodeForbidden, "无权限"))
 			return
 		}

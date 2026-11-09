@@ -26,6 +26,7 @@ type GlobalConfig struct {
 	Provider   Provider
 	Recovery   Recovery
 	Operations Operations
+	Tracking   Tracking
 	Retention  Retention
 	Log        Log
 	Auth       Auth
@@ -169,8 +170,26 @@ type Recovery struct {
 
 // Retention 数据保留与缓存策略。
 type Retention struct {
-	OverviewCache time.Duration // 运行概览缓存，建议 5s
-	ResolvedAfter time.Duration // 结案记录保留期，建议 30 天
+	OverviewCache   time.Duration // 运行概览缓存，建议 5s
+	ResolvedAfter   time.Duration // 结案记录保留期，建议 30 天
+	ScanInterval    time.Duration
+	BatchEvents     int
+	MaxRowsPerEvent int
+}
+
+// Tracking 是 S08 查询、概览与探针参数。
+type Tracking struct {
+	DefaultPageSize     int
+	MaxPageSize         int
+	DefaultWindow       time.Duration
+	MaxWindow           time.Duration
+	CursorTTL           time.Duration
+	CursorKeyRef        string // 受保护密钥文件路径；不记录内容
+	QueryTimeout        time.Duration
+	OverviewParallelism int
+	ProbeTimeout        time.Duration
+	BlockedAlert        time.Duration
+	UnknownAlert        time.Duration
 }
 
 // Log 结构化日志。
@@ -265,6 +284,12 @@ func Default() GlobalConfig {
 		Retention: Retention{
 			OverviewCache: 5 * time.Second,
 			ResolvedAfter: 30 * 24 * time.Hour,
+			ScanInterval:  time.Hour, BatchEvents: 100, MaxRowsPerEvent: 5000,
+		},
+		Tracking: Tracking{
+			DefaultPageSize: 20, MaxPageSize: 100, DefaultWindow: 168 * time.Hour, MaxWindow: 744 * time.Hour,
+			CursorTTL: 24 * time.Hour, QueryTimeout: 2 * time.Second, OverviewParallelism: 2, ProbeTimeout: 500 * time.Millisecond,
+			BlockedAlert: 15 * time.Minute, UnknownAlert: 5 * time.Minute,
 		},
 		Log:    Log{Level: "info", Format: "json"},
 		Auth:   Auth{ConfigRef: "config/identities.example.json"},
@@ -344,12 +369,18 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"RECOVERY_DLQ_AUTO_REPAIRS", &c.Recovery.DLQAutoRepairs},
 		{"OPERATIONS_MAX_BODY_BYTES", &c.Operations.MaxBodyBytes},
 		{"OPERATIONS_MAX_EVIDENCE_ATTEMPTS", &c.Operations.MaxEvidenceAttempts},
+		{"TRACKING_DEFAULT_PAGE_SIZE", &c.Tracking.DefaultPageSize},
+		{"TRACKING_MAX_PAGE_SIZE", &c.Tracking.MaxPageSize},
+		{"TRACKING_OVERVIEW_PARALLELISM", &c.Tracking.OverviewParallelism},
+		{"RETENTION_BATCH_EVENTS", &c.Retention.BatchEvents},
+		{"RETENTION_MAX_ROWS_PER_EVENT", &c.Retention.MaxRowsPerEvent},
 	} {
 		if *it.dst, err = envInt(it.key, *it.dst); err != nil {
 			return GlobalConfig{}, err
 		}
 	}
 	c.Provider.SecretsFile = envStr("PROVIDER_SECRETS_FILE", c.Provider.SecretsFile)
+	c.Tracking.CursorKeyRef = envStr("TRACKING_CURSOR_KEY_REF", c.Tracking.CursorKeyRef)
 	if c.Outbox.BatchSize, err = envInt("OUTBOX_BATCH_SIZE", c.Outbox.BatchSize); err != nil {
 		return GlobalConfig{}, err
 	}
@@ -462,6 +493,14 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"RECOVERY_ERROR_BACKOFF", &c.Recovery.ErrorBackoff},
 		{"OPERATIONS_TIMEOUT", &c.Operations.Timeout},
 		{"OPERATIONS_CONFIRM_TIMEOUT", &c.Operations.ConfirmTimeout},
+		{"TRACKING_DEFAULT_WINDOW", &c.Tracking.DefaultWindow},
+		{"TRACKING_MAX_WINDOW", &c.Tracking.MaxWindow},
+		{"TRACKING_CURSOR_TTL", &c.Tracking.CursorTTL},
+		{"TRACKING_QUERY_TIMEOUT", &c.Tracking.QueryTimeout},
+		{"TRACKING_PROBE_TIMEOUT", &c.Tracking.ProbeTimeout},
+		{"TRACKING_ALERT_BLOCKED_AFTER", &c.Tracking.BlockedAlert},
+		{"TRACKING_ALERT_UNKNOWN_AFTER", &c.Tracking.UnknownAlert},
+		{"RETENTION_SCAN_INTERVAL", &c.Retention.ScanInterval},
 		{"RETENTION_OVERVIEW_CACHE", &c.Retention.OverviewCache},
 		{"RETENTION_RESOLVED_AFTER", &c.Retention.ResolvedAfter},
 		{"CONFIG_CALCULATION_TIMEOUT", &c.Config.CalculationTimeout},
