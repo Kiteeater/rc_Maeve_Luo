@@ -12,25 +12,30 @@ import (
 
 // 错误码与 HTTP 状态的对应关系见 S00 第 8 节。未知码按 internal/500 处理。
 const (
-	CodeInvalidRequest        = "invalid_request"
-	CodeInvalidCursor         = "invalid_cursor"
-	CodeUnauthenticated       = "unauthenticated"
-	CodeForbidden             = "forbidden"
-	CodeNotFound              = "not_found"
-	CodeIdempotencyConflict   = "idempotency_conflict"
-	CodeVersionConflict       = "version_conflict"
-	CodeStateConflict         = "state_conflict"
-	CodePayloadTooLarge       = "payload_too_large"
-	CodeUnsupportedMediaType  = "unsupported_media_type"
-	CodeUnsupportedSchema     = "unsupported_schema"
-	CodeNoMatchingRoute       = "no_matching_route"
-	CodeMappingInvalid        = "mapping_invalid"
-	CodeUnsafeReplay          = "unsafe_replay"
-	CodeRateLimited           = "rate_limited"
-	CodeDependencyUnavailable = "dependency_unavailable"
-	CodeAdmissionPaused       = "admission_paused"
-	CodeInternal              = "internal"
-	CodeNotImplemented        = "not_implemented"
+	CodeInvalidRequest           = "invalid_request"
+	CodeInvalidCursor            = "invalid_cursor"
+	CodeUnauthenticated          = "unauthenticated"
+	CodeForbidden                = "forbidden"
+	CodeNotFound                 = "not_found"
+	CodeIdempotencyConflict      = "idempotency_conflict"
+	CodeVersionConflict          = "version_conflict"
+	CodeStateConflict            = "state_conflict"
+	CodePayloadTooLarge          = "payload_too_large"
+	CodeUnsupportedMediaType     = "unsupported_media_type"
+	CodeUnsupportedSchema        = "unsupported_schema"
+	CodeNoMatchingRoute          = "no_matching_route"
+	CodeMappingInvalid           = "mapping_invalid"
+	CodeUnsafeReplay             = "unsafe_replay"
+	CodeRateLimited              = "rate_limited"
+	CodeDependencyUnavailable    = "dependency_unavailable"
+	CodeAdmissionPaused          = "admission_paused"
+	CodeInternal                 = "internal"
+	CodeNotImplemented           = "not_implemented"
+	CodeConfigInvalid            = "config_invalid"
+	CodeConfigurationChanged     = "configuration_changed"
+	CodeConfigurationUnavailable = "configuration_unavailable"
+	CodePlanTimeout              = "plan_timeout"
+	CodeLimitExceeded            = "limit_exceeded"
 )
 
 // StatusOf 返回稳定错误码对应的 HTTP 状态。
@@ -44,17 +49,17 @@ func StatusOf(code string) int {
 		return http.StatusForbidden
 	case CodeNotFound:
 		return http.StatusNotFound
-	case CodeIdempotencyConflict, CodeVersionConflict, CodeStateConflict:
+	case CodeIdempotencyConflict, CodeVersionConflict, CodeStateConflict, CodeConfigurationChanged:
 		return http.StatusConflict
 	case CodePayloadTooLarge:
 		return http.StatusRequestEntityTooLarge
 	case CodeUnsupportedMediaType:
 		return http.StatusUnsupportedMediaType
-	case CodeUnsupportedSchema, CodeNoMatchingRoute, CodeMappingInvalid, CodeUnsafeReplay:
+	case CodeUnsupportedSchema, CodeNoMatchingRoute, CodeMappingInvalid, CodeUnsafeReplay, CodeConfigInvalid, CodeLimitExceeded:
 		return http.StatusUnprocessableEntity
 	case CodeRateLimited:
 		return http.StatusTooManyRequests
-	case CodeDependencyUnavailable, CodeAdmissionPaused:
+	case CodeDependencyUnavailable, CodeAdmissionPaused, CodeConfigurationUnavailable, CodePlanTimeout:
 		return http.StatusServiceUnavailable
 	case CodeNotImplemented:
 		return http.StatusNotImplemented

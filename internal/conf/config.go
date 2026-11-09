@@ -28,6 +28,22 @@ type GlobalConfig struct {
 	Log       Log
 	Auth      Auth
 	Limits    Limits
+	Config    Config
+}
+
+// Config 是 S01 发布与计划计算的启动上限。业务计算使用注入后的副本，不读环境变量。
+type Config struct {
+	MaxBytes           int
+	MaxRoutes          int
+	MaxTargets         int
+	MaxConditions      int
+	MaxMappingFields   int
+	MaxPathBytes       int
+	CalculationTimeout time.Duration
+	CacheTTL           time.Duration
+	MaxEventBytes      int
+	MaxFanout          int
+	ServerWaitCap      time.Duration
 }
 
 // HTTP 接入与查询服务。
@@ -152,6 +168,19 @@ func Default() GlobalConfig {
 		Log:    Log{Level: "info", Format: "json"},
 		Auth:   Auth{ConfigRef: "config/identities.example.json"},
 		Limits: Limits{SummaryBytes: 2048},
+		Config: Config{
+			MaxBytes:           1 << 20,
+			MaxRoutes:          500,
+			MaxTargets:         500,
+			MaxConditions:      20,
+			MaxMappingFields:   200,
+			MaxPathBytes:       256,
+			CalculationTimeout: 500 * time.Millisecond,
+			CacheTTL:           time.Hour,
+			MaxEventBytes:      256 << 10,
+			MaxFanout:          50,
+			ServerWaitCap:      time.Hour,
+		},
 	}
 }
 
@@ -203,6 +232,30 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	if c.Limits.SummaryBytes, err = envInt("SUMMARY_MAX_BYTES", c.Limits.SummaryBytes); err != nil {
 		return GlobalConfig{}, err
 	}
+	if c.Config.MaxBytes, err = envInt("CONFIG_MAX_BYTES", c.Config.MaxBytes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxRoutes, err = envInt("CONFIG_MAX_ROUTES", c.Config.MaxRoutes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxTargets, err = envInt("CONFIG_MAX_TARGETS", c.Config.MaxTargets); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxConditions, err = envInt("CONFIG_MAX_CONDITIONS", c.Config.MaxConditions); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxMappingFields, err = envInt("CONFIG_MAX_MAPPING_FIELDS", c.Config.MaxMappingFields); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxPathBytes, err = envInt("CONFIG_MAX_PATH_BYTES", c.Config.MaxPathBytes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxEventBytes, err = envInt("CONFIG_MAX_EVENT_BYTES", c.Config.MaxEventBytes); err != nil {
+		return GlobalConfig{}, err
+	}
+	if c.Config.MaxFanout, err = envInt("CONFIG_MAX_FANOUT", c.Config.MaxFanout); err != nil {
+		return GlobalConfig{}, err
+	}
 
 	durations := []struct {
 		key string
@@ -225,6 +278,8 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"RECOVERY_SCAN_INTERVAL", &c.Recovery.ScanInterval},
 		{"RETENTION_OVERVIEW_CACHE", &c.Retention.OverviewCache},
 		{"RETENTION_RESOLVED_AFTER", &c.Retention.ResolvedAfter},
+		{"CONFIG_CALCULATION_TIMEOUT", &c.Config.CalculationTimeout},
+		{"CONFIG_CACHE_TTL", &c.Config.CacheTTL},
 	}
 	for _, d := range durations {
 		if *d.dst, err = envDuration(d.key, *d.dst); err != nil {
@@ -232,6 +287,7 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		}
 	}
 
+	c.Config.ServerWaitCap = c.Delivery.ServerWaitCap
 	if err := l.resolveSecrets(ctx, &c); err != nil {
 		return GlobalConfig{}, err
 	}

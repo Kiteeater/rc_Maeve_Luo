@@ -56,4 +56,31 @@ const (
 	// Summary 字节上限的配置边界。截断按 UTF-8 字节进行，并另存截断标记。
 	SummaryBytesMin = 256
 	SummaryBytesMax = 8192
+
+	// GlobalCallerScope 是配置发布等全局管理操作的调用方范围。
+	GlobalCallerScope = "__global__"
+
+	// 配置发布操作类型。与 S07 的管理操作共用 management_events。
+	OpConfigCreate  = "config_create"
+	OpConfigPublish = "config_publish"
+)
+
+// 领域错误码。HTTP 映射在 service。未知码不得当成成功。
+const (
+	CodeInvalidRequest           = "invalid_request"
+	CodeForbidden                = "forbidden"
+	CodeNotFound                 = "not_found"
+	CodeIdempotencyConflict      = "idempotency_conflict"
+	CodeVersionConflict          = "version_conflict"
+	CodeStateConflict            = "state_conflict"
+	CodeConfigInvalid            = "config_invalid"
+	CodeConfigurationChanged     = "configuration_changed"
+	CodeConfigurationUnavailable = "configuration_unavailable"
+	CodeUnsupportedSchema        = "unsupported_schema"
+	CodeNoMatchingRoute          = "no_matching_route"
+	CodeMappingInvalid           = "mapping_invalid"
+	CodePlanTimeout              = "plan_timeout"
+	CodeLimitExceeded            = "limit_exceeded"
+	CodeDependencyUnavailable    = "dependency_unavailable"
+	CodeInternal                 = "internal"
 )

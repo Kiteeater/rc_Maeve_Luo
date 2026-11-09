@@ -56,6 +56,43 @@ func validate(c *GlobalConfig) error {
 	if c.Delivery.MQInvisible < c.Delivery.LeaseTimeout+c.MySQL.OperationTimeout {
 		return fmt.Errorf("conf: DELIVERY_MQ_INVISIBLE must be >= DELIVERY_LEASE_TIMEOUT + MYSQL_OPERATION_TIMEOUT")
 	}
+	if err := intBetween("CONFIG_MAX_BYTES", c.Config.MaxBytes, 64*1024, 4*1024*1024); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_ROUTES", c.Config.MaxRoutes, 1, 2000); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_TARGETS", c.Config.MaxTargets, 1, 2000); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_CONDITIONS", c.Config.MaxConditions, 0, 100); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_MAPPING_FIELDS", c.Config.MaxMappingFields, 1, 1000); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_PATH_BYTES", c.Config.MaxPathBytes, 16, 1024); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_EVENT_BYTES", c.Config.MaxEventBytes, 1024, 1<<20); err != nil {
+		return err
+	}
+	if err := intBetween("CONFIG_MAX_FANOUT", c.Config.MaxFanout, 1, 50); err != nil {
+		return err
+	}
+	if err := durationBetween("CONFIG_CALCULATION_TIMEOUT", c.Config.CalculationTimeout, 50*time.Millisecond, 2*time.Second); err != nil {
+		return err
+	}
+	if err := durationBetween("CONFIG_CACHE_TTL", c.Config.CacheTTL, time.Minute, 24*time.Hour); err != nil {
+		return err
+	}
+	return nil
+}
+
+func intBetween(name string, value, min, max int) error {
+	if value < min || value > max {
+		return fmt.Errorf("conf: %s out of range", name)
+	}
 	return nil
 }
 

@@ -10,6 +10,7 @@ import (
 	"context"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
+	"notifier/internal/data/provider"
 	"notifier/internal/data/redis"
 	"notifier/internal/data/rocketmq"
 	"notifier/internal/server"
@@ -52,7 +53,14 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	}
 	readiness := newReadiness(db, client, rocketmqClient, set, mySQL)
 	healthService := service.NewHealthService(readiness)
-	httpServer := server.NewHTTPServer(http, healthService)
+	executor := newExecutor(db, mySQL)
+	releaseStore := mysql.NewReleaseStore(db, executor)
+	registry := provider.NewMockRegistry()
+	config := globalConfig.Config
+	releaseCache := newReleaseCache(client, config)
+	useCase := newConfigUseCase(releaseStore, releaseStore, releaseStore, registry, releaseCache, config)
+	releaseService := newReleaseService(useCase, config)
+	httpServer := server.NewHTTPServer(http, healthService, releaseService, set)
 	group := emptyRoles()
 	mainApplication := newApplication(http, log, httpServer, group)
 	return mainApplication, func() {

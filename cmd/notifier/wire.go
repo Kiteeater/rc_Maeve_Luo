@@ -9,8 +9,10 @@ import (
 
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
+	"notifier/internal/data/provider"
 	"notifier/internal/data/redis"
 	"notifier/internal/data/rocketmq"
+	"notifier/internal/data_interface"
 	"notifier/internal/server"
 	"notifier/internal/service"
 )
@@ -20,11 +22,22 @@ import (
 func initializeApp(ctx context.Context) (*application, func(), error) {
 	wire.Build(
 		conf.Load,
-		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Log", "Auth"),
+		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Log", "Auth", "Config"),
 		loadIdentities,
 		mysql.Open,
 		redis.Open,
 		rocketmq.Open,
+		newExecutor,
+		mysql.NewReleaseStore,
+		newReleaseCache,
+		provider.NewMockRegistry,
+		wire.Bind(new(data_interface.ReleaseRepository), new(*mysql.ReleaseStore)),
+		wire.Bind(new(data_interface.ChannelReader), new(*mysql.ReleaseStore)),
+		wire.Bind(new(data_interface.CredentialReader), new(*mysql.ReleaseStore)),
+		wire.Bind(new(data_interface.ReleaseCache), new(*redis.ReleaseCache)),
+		wire.Bind(new(data_interface.AdapterRegistry), new(*provider.Registry)),
+		newConfigUseCase,
+		newReleaseService,
 		newReadiness,
 		service.NewHealthService,
 		server.NewHTTPServer,

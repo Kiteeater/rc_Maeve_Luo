@@ -35,10 +35,13 @@ type TargetPlan struct {
 }
 
 // DeliveryPlan 是一次发布计算出的固定计划。轮次策略 JSON 的结构由 S01 定义。
+// VersionNo 是服务器分配的发布序号；FormatVersion 是内容里的 format_version。
 type DeliveryPlan struct {
-	ReleaseRef  string
-	Targets     []TargetPlan
-	RoundPolicy []byte
+	ReleaseRef    string
+	VersionNo     uint32
+	FormatVersion int
+	Targets       []TargetPlan
+	RoundPolicy   []byte
 }
 
 // Ownership 是一次领取的所有权。校验规则由 S03 完成。
