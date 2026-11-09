@@ -112,4 +112,11 @@ const (
 	ErrAttemptLimit         = "ATTEMPT_LIMIT_REACHED"
 	ErrRoundDeadline        = "ROUND_DEADLINE_REACHED"
 	ErrUnsafeResend         = "UNSAFE_RESEND"
+	ErrProtocolInvalid      = "PROTOCOL_INVALID_RESPONSE"
+	ErrAuthRejected         = "PROVIDER_AUTH_REJECTED"
+	ErrRedirectRefused      = "REDIRECT_REFUSED"
+	ErrCredentialRevoked    = "CREDENTIAL_REVOKED"
+	ErrCredentialReauth     = "CREDENTIAL_REAUTH_REQUIRED"
+	ErrAccountMismatch      = "ACCOUNT_MISMATCH"
+	ErrRateLimiterDown      = "RATE_LIMITER_UNAVAILABLE"
 )

@@ -8,6 +8,7 @@ import (
 	"github.com/google/wire"
 
 	"notifier/internal/biz/biz_outbox"
+	"notifier/internal/biz/biz_provider"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
 	"notifier/internal/data/provider"
@@ -23,7 +24,7 @@ import (
 func initializeApp(ctx context.Context) (*application, func(), error) {
 	wire.Build(
 		conf.Load,
-		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Outbox", "Log", "Auth", "Config", "Event", "Delivery", "Limits"),
+		wire.FieldsOf(new(conf.GlobalConfig), "HTTP", "MySQL", "Redis", "RocketMQ", "Outbox", "Provider", "Log", "Auth", "Config", "Event", "Delivery", "Limits"),
 		loadIdentities,
 		mysql.Open,
 		redis.Open,
@@ -46,7 +47,18 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 		service.NewHealthService,
 		server.NewHTTPServer,
 		mysql.NewDeliveryStore,
-		provider.NewUnavailableRuntime,
+		newProviderRuntime,
+		mysql.NewProviderStore,
+		redis.NewRateLimiter,
+		provider.NewFileSecrets,
+		provider.NewTransport,
+		wire.Struct(new(provider.Resolver), "*"),
+		wire.Bind(new(provider.SecretSource), new(*provider.FileSecrets)),
+		wire.Bind(new(data_interface.ChannelStateReader), new(*mysql.ProviderStore)),
+		wire.Bind(new(data_interface.CredentialStore), new(*mysql.ProviderStore)),
+		wire.Bind(new(data_interface.RateLimiter), new(*redis.RateLimiter)),
+		wire.Bind(new(data_interface.CredentialResolver), new(*provider.Resolver)),
+		wire.Bind(new(data_interface.HTTPCaller), new(*provider.Transport)),
 		mysql.NewOutboxStore,
 		wire.Bind(new(data_interface.OutboxStore), new(*mysql.OutboxStore)),
 		wire.Bind(new(data_interface.CommandSender), new(*rocketmq.Client)),
@@ -59,7 +71,7 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 		newMQSource,
 		newPublisherRole,
 		wire.Bind(new(data_interface.DeliveryStore), new(*mysql.DeliveryStore)),
-		wire.Bind(new(data_interface.ProviderRuntime), new(*provider.UnavailableRuntime)),
+		wire.Bind(new(data_interface.ProviderRuntime), new(*biz_provider.Runtime)),
 		wire.Bind(new(data_interface.ScheduleOriginal), new(*biz_outbox.Rescheduler)),
 		newDeliveryUseCase,
 		newDeliveryRunner,

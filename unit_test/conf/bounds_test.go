@@ -69,6 +69,11 @@ func TestC08_BoundaryValuesLoad(t *testing.T) {
 	t.Setenv("DELIVERY_LEASE_TIMEOUT", "5s")
 	t.Setenv("DELIVERY_ACK_TIMEOUT", "100ms")
 	t.Setenv("DELIVERY_CREDENTIAL_PREPARE", "100ms")
+	// S05：凭证获取预算不超过 S03 准备预算；拨号/TLS/响应头不超过 HTTP 总预算。
+	t.Setenv("PROVIDER_CREDENTIAL_TIMEOUT", "100ms")
+	t.Setenv("PROVIDER_DIAL_TIMEOUT", "100ms")
+	t.Setenv("PROVIDER_TLS_TIMEOUT", "100ms")
+	t.Setenv("PROVIDER_HEADER_TIMEOUT", "100ms")
 	t.Setenv("DELIVERY_MQ_INVISIBLE", "10200ms")
 	t.Setenv("DELIVERY_MQ_MAX_EXTENSION", "10200ms")
 	cfg, err := conf.Load(context.Background())

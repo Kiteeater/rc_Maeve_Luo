@@ -23,6 +23,7 @@ type GlobalConfig struct {
 	RocketMQ  RocketMQ
 	Delivery  Delivery
 	Outbox    Outbox
+	Provider  Provider
 	Recovery  Recovery
 	Retention Retention
 	Log       Log
@@ -114,6 +115,21 @@ type Delivery struct {
 	BlockedCheck           time.Duration
 }
 
+// Provider 供应商执行边界参数（S05 第 10 节）。
+type Provider struct {
+	CredentialTimeout  time.Duration
+	TokenSkew          time.Duration
+	DialTimeout        time.Duration
+	TLSTimeout         time.Duration
+	HeaderTimeout      time.Duration
+	MaxResponseBytes   int
+	MaxRequestBytes    int
+	MaxIdleConnections int
+	IdleTimeout        time.Duration
+	// SecretsFile 是本地/测试环境的凭证秘密文件路径（JSON：credential_ref -> secret）。生产由密钥服务替换，不入库。
+	SecretsFile string
+}
+
 // Outbox 可靠发布参数。
 type Outbox struct {
 	PollInterval   time.Duration // 空闲轮询，建议 1s
@@ -199,6 +215,17 @@ func Default() GlobalConfig {
 			MaxAllowedRoundTimeout: 168 * time.Hour,
 			BlockedCheck:           60 * time.Second,
 		},
+		Provider: Provider{
+			CredentialTimeout:  5 * time.Second,
+			TokenSkew:          30 * time.Second,
+			DialTimeout:        2 * time.Second,
+			TLSTimeout:         3 * time.Second,
+			HeaderTimeout:      5 * time.Second,
+			MaxResponseBytes:   1 << 20,
+			MaxRequestBytes:    256 << 10,
+			MaxIdleConnections: 100,
+			IdleTimeout:        90 * time.Second,
+		},
 		Outbox: Outbox{
 			PollInterval:   time.Second,
 			GracePeriod:    5 * time.Minute,
@@ -282,6 +309,19 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 	if c.Redis.DB, err = envInt("REDIS_DB", c.Redis.DB); err != nil {
 		return GlobalConfig{}, err
 	}
+	for _, it := range []struct {
+		key string
+		dst *int
+	}{
+		{"PROVIDER_MAX_RESPONSE_BYTES", &c.Provider.MaxResponseBytes},
+		{"PROVIDER_MAX_REQUEST_BYTES", &c.Provider.MaxRequestBytes},
+		{"PROVIDER_MAX_IDLE_CONNECTIONS", &c.Provider.MaxIdleConnections},
+	} {
+		if *it.dst, err = envInt(it.key, *it.dst); err != nil {
+			return GlobalConfig{}, err
+		}
+	}
+	c.Provider.SecretsFile = envStr("PROVIDER_SECRETS_FILE", c.Provider.SecretsFile)
 	if c.Outbox.BatchSize, err = envInt("OUTBOX_BATCH_SIZE", c.Outbox.BatchSize); err != nil {
 		return GlobalConfig{}, err
 	}
@@ -358,6 +398,12 @@ func (l Loader) Load(ctx context.Context) (GlobalConfig, error) {
 		{"HTTP_SHUTDOWN_TIMEOUT", &c.HTTP.ShutdownTimeout},
 		{"MYSQL_OPERATION_TIMEOUT", &c.MySQL.OperationTimeout},
 		{"DELIVERY_HTTP_TIMEOUT", &c.Delivery.HTTPTimeout},
+		{"PROVIDER_CREDENTIAL_TIMEOUT", &c.Provider.CredentialTimeout},
+		{"PROVIDER_TOKEN_EXPIRY_SKEW", &c.Provider.TokenSkew},
+		{"PROVIDER_DIAL_TIMEOUT", &c.Provider.DialTimeout},
+		{"PROVIDER_TLS_TIMEOUT", &c.Provider.TLSTimeout},
+		{"PROVIDER_HEADER_TIMEOUT", &c.Provider.HeaderTimeout},
+		{"PROVIDER_IDLE_TIMEOUT", &c.Provider.IdleTimeout},
 		{"DELIVERY_BUILD_TIMEOUT", &c.Delivery.BuildTimeout},
 		{"DELIVERY_LEASE_TIMEOUT", &c.Delivery.LeaseTimeout},
 		{"DELIVERY_RESULT_RESERVE", &c.Delivery.ResultReserve},

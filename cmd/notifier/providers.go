@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"database/sql"
+	"time"
 
 	goredis "github.com/redis/go-redis/v9"
 
@@ -10,6 +11,7 @@ import (
 	"notifier/internal/biz/biz_delivery"
 	"notifier/internal/biz/biz_event"
 	"notifier/internal/biz/biz_outbox"
+	"notifier/internal/biz/biz_provider"
 	"notifier/internal/conf"
 	"notifier/internal/data/mysql"
 	"notifier/internal/data/redis"
@@ -129,4 +131,16 @@ func newPublisherRole(p *biz_outbox.Publisher, cfg conf.Outbox) *server.Publishe
 
 func newRoles(worker *server.Worker, pub *server.Publisher) *server.Group {
 	return server.NewGroup(pub, worker)
+}
+
+// newProviderRuntime 组装 S05 供应商执行边界。
+func newProviderRuntime(reg data_interface.AdapterRegistry, ch data_interface.ChannelStateReader, lim data_interface.RateLimiter,
+	creds data_interface.CredentialResolver, http data_interface.HTTPCaller, d conf.Delivery, p conf.Provider, limits conf.Limits) *biz_provider.Runtime {
+	return &biz_provider.Runtime{
+		Registry: reg, Channels: ch, Limiter: lim, Creds: creds, HTTP: http,
+		Config: biz_provider.Config{
+			HTTPBudget: d.HTTPTimeout, TokenSkew: p.TokenSkew, MaxRequestBytes: p.MaxRequestBytes,
+			SummaryMax: limits.SummaryBytes, LimiterRetry: time.Second,
+		},
+	}
 }

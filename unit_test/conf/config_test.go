@@ -60,6 +60,7 @@ func TestLocalConfig(t *testing.T) {
 	t.Setenv("HTTP_ADDR", ":8090")
 	t.Setenv("REDIS_DB", "2")
 	t.Setenv("DELIVERY_HTTP_TIMEOUT", "3s")
+	t.Setenv("PROVIDER_HEADER_TIMEOUT", "3s")
 	cfg, err = conf.Load(context.Background())
 	if err != nil {
 		t.Fatal(err)

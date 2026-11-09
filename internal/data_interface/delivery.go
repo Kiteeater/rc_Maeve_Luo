@@ -262,6 +262,12 @@ type BuiltRequest struct {
 	Truncated  bool
 	Size       int
 	Body       []byte
+	// 以下由 S05 填写。CredentialHandle 是不透明句柄，只由 data/provider 解引用并在发送时生成鉴权头。
+	URL              string
+	AuthType         string
+	IdempotencyKey   string
+	CredentialHandle string
+	AllowedCIDRs     []string
 }
 
 // SendResponse 是单次传输的原始事实。禁止隐式重试。
@@ -272,6 +278,8 @@ type SendResponse struct {
 	ProviderRequestID string
 	ErrorCode         string
 	TransportErr      string
+	// Facts 是本次传输事实（S05），仅在内存中交给 Interpret，不持久化原始响应体。
+	Facts domain.TransportFacts
 }
 
 // Interpreted 是 S05 对单次响应的协议解释。

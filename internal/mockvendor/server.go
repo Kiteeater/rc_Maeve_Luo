@@ -37,6 +37,7 @@ type Server struct {
 	timeout time.Duration
 	deflt   string
 	state   *store
+	book    *scenarioBook
 	http    *http.Server
 }
 
@@ -56,7 +57,7 @@ func New(opts Options) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	s := &Server{addr: addr, timeout: opts.Timeout, deflt: opts.DefaultScenario, state: st}
+	s := &Server{addr: addr, timeout: opts.Timeout, deflt: opts.DefaultScenario, state: st, book: newScenarioBook(receiptPath(opts.StatePath))}
 	s.http = &http.Server{
 		Addr:              addr,
 		Handler:           s.Handler(),
@@ -75,6 +76,8 @@ func (s *Server) ListenAndServe() error { return s.http.ListenAndServe() }
 func (s *Server) Handler() http.Handler {
 	mux := http.NewServeMux()
 	mux.HandleFunc("GET /admin/counts", s.counts)
+	mux.HandleFunc("PUT /__test/scenarios/{name}", s.putScenario)
+	mux.HandleFunc("GET /__test/receipts", s.getReceipt)
 	mux.HandleFunc("/", s.receive)
 	return mux
 }
@@ -90,6 +93,9 @@ func (s *Server) receive(w http.ResponseWriter, r *http.Request) {
 	}
 	key := r.Header.Get("Idempotency-Key")
 	s.state.add(key)
+	if s.serveScenario(w, r) {
+		return
+	}
 	scenario := r.Header.Get("X-Mock-Scenario")
 	if scenario == "" {
 		scenario = r.URL.Query().Get("scenario")
@@ -235,4 +241,11 @@ func (s *store) persist() {
 		return
 	}
 	_ = os.Rename(tmp, s.path)
+}
+
+func receiptPath(state string) string {
+	if state == "" {
+		return ""
+	}
+	return state + ".receipts.json"
 }

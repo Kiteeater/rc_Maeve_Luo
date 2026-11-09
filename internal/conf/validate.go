@@ -171,7 +171,42 @@ func validate(c *GlobalConfig) error {
 	if !asciiAlnum(c.Event.IdempotencyNamespace, 1, 24) {
 		return fmt.Errorf("conf: DELIVERY_IDEMPOTENCY_NAMESPACE out of range")
 	}
+	if err := validateProvider(c); err != nil {
+		return err
+	}
 	return validateOutbox(c)
+}
+
+// validateProvider 校验 S05 第 10 节参数及与 S03 预算的关系。
+func validateProvider(c *GlobalConfig) error {
+	p := c.Provider
+	if err := durationBetween("PROVIDER_CREDENTIAL_TIMEOUT", p.CredentialTimeout, 100*time.Millisecond, 10*time.Second); err != nil {
+		return err
+	}
+	if p.CredentialTimeout > c.Delivery.CredentialPrepare {
+		return fmt.Errorf("conf: PROVIDER_CREDENTIAL_TIMEOUT must be <= DELIVERY_CREDENTIAL_PREPARE")
+	}
+	if err := durationBetween("PROVIDER_TOKEN_EXPIRY_SKEW", p.TokenSkew, 5*time.Second, 300*time.Second); err != nil {
+		return err
+	}
+	for _, d := range []struct {
+		name string
+		v    time.Duration
+	}{{"PROVIDER_DIAL_TIMEOUT", p.DialTimeout}, {"PROVIDER_TLS_TIMEOUT", p.TLSTimeout}, {"PROVIDER_HEADER_TIMEOUT", p.HeaderTimeout}} {
+		if err := durationBetween(d.name, d.v, 100*time.Millisecond, c.Delivery.HTTPTimeout); err != nil {
+			return err
+		}
+	}
+	if err := intBetween("PROVIDER_MAX_RESPONSE_BYTES", p.MaxResponseBytes, 4<<10, 8<<20); err != nil {
+		return err
+	}
+	if err := intBetween("PROVIDER_MAX_REQUEST_BYTES", p.MaxRequestBytes, 1<<10, 1<<20); err != nil {
+		return err
+	}
+	if err := intBetween("PROVIDER_MAX_IDLE_CONNECTIONS", p.MaxIdleConnections, 1, 1000); err != nil {
+		return err
+	}
+	return durationBetween("PROVIDER_IDLE_TIMEOUT", p.IdleTimeout, 10*time.Second, 300*time.Second)
 }
 
 // validateOutbox 校验 S04 第 8 节的发布参数及其关系。

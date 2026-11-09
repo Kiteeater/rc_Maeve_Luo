@@ -67,12 +67,27 @@ func initializeApp(ctx context.Context) (*application, func(), error) {
 	httpServer := server.NewHTTPServer(http, healthService, releaseService, eventService, set)
 	delivery := globalConfig.Delivery
 	deliveryStore := mysql.NewDeliveryStore(db, executor)
-	unavailableRuntime := provider.NewUnavailableRuntime()
+	providerStore := mysql.NewProviderStore(db)
+	rateLimiter := redis.NewRateLimiter(client)
+	confProvider := globalConfig.Provider
+	fileSecrets, err := provider.NewFileSecrets(confProvider)
+	if err != nil {
+		cleanup3()
+		cleanup2()
+		cleanup()
+		return nil, nil, err
+	}
+	resolver := &provider.Resolver{
+		Store:   providerStore,
+		Secrets: fileSecrets,
+	}
+	transport := provider.NewTransport(confProvider, fileSecrets)
+	limits := globalConfig.Limits
+	runtime := newProviderRuntime(registry, providerStore, rateLimiter, resolver, transport, delivery, confProvider, limits)
 	outboxStore := mysql.NewOutboxStore(db, executor)
 	outbox := globalConfig.Outbox
 	rescheduler := newRescheduler(outboxStore, outbox)
-	limits := globalConfig.Limits
-	biz_deliveryUseCase := newDeliveryUseCase(deliveryStore, unavailableRuntime, rescheduler, delivery, limits)
+	biz_deliveryUseCase := newDeliveryUseCase(deliveryStore, runtime, rescheduler, delivery, limits)
 	runner := newDeliveryRunner(biz_deliveryUseCase)
 	consumer, cleanup4, err := rocketmq.OpenConsumer(rocketMQ, rocketmqClient)
 	if err != nil {
