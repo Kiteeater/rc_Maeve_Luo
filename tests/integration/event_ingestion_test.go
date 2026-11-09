@@ -476,6 +476,7 @@ type fixedPlan struct {
 
 func (p *fixedPlan) Calculate(ctx context.Context, principal biz_event.Principal, releaseID uint64, env domain.EventEnvelope) (domain.DeliveryPlan, error) {
 	plan := p.plan
+	plan.Targets = append(plan.Targets[:0:0], p.plan.Targets...) // 并发 Submit 不共享底层数组
 	plan.ReleaseRef = u64(releaseID)
 	if p.echoData {
 		for i := range plan.Targets {
