@@ -8,6 +8,8 @@ Makefile
 compose.yaml
 docker-compose*.yml
 bin/
+ai-sessions.zip
+ai-sessions.zip.sha256
 /data/
 .idea/
 .vscode/
