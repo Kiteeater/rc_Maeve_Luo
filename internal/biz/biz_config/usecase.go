@@ -116,7 +116,7 @@ func (u *UseCase) Publish(ctx context.Context, principal Principal, releaseID ui
 		return data_interface.PublishResult{}, err
 	}
 	if _, err := domain.FormatInternalID(releaseID); err != nil {
-		return data_interface.PublishResult{}, fail(constant.CodeNotFound, "发布不存在", "release_id")
+		return data_interface.PublishResult{}, fail(constant.ReasonReleaseNotFound, "发布不存在", "release_id")
 	}
 	fp, err := data_interface.PublishFingerprint(releaseID, expected, reason)
 	if err != nil {
@@ -131,7 +131,7 @@ func (u *UseCase) Publish(ctx context.Context, principal Principal, releaseID ui
 		Expected:       expected,
 	})
 	if errors.Is(err, data_interface.ErrReleaseNotFound) {
-		return data_interface.PublishResult{}, fail(constant.CodeNotFound, "发布不存在", "release_id")
+		return data_interface.PublishResult{}, fail(constant.ReasonReleaseNotFound, "发布不存在", "release_id")
 	}
 	return out, err
 }
@@ -140,7 +140,7 @@ func (u *UseCase) Publish(ctx context.Context, principal Principal, releaseID ui
 func (u *UseCase) Get(ctx context.Context, releaseID uint64) (ReleaseView, error) {
 	rec, err := u.repo.Load(ctx, releaseID)
 	if errors.Is(err, data_interface.ErrReleaseNotFound) {
-		return ReleaseView{}, fail(constant.CodeNotFound, "发布不存在", "release_id")
+		return ReleaseView{}, fail(constant.ReasonReleaseNotFound, "发布不存在", "release_id")
 	}
 	if err != nil {
 		return ReleaseView{}, err
@@ -152,7 +152,7 @@ func (u *UseCase) Get(ctx context.Context, releaseID uint64) (ReleaseView, error
 func (u *UseCase) Current(ctx context.Context) (ReleaseView, error) {
 	id, err := u.repo.LoadCurrentID(ctx)
 	if errors.Is(err, data_interface.ErrNoCurrent) {
-		return ReleaseView{}, fail(constant.CodeConfigurationUnavailable, "当前没有已发布配置", "")
+		return ReleaseView{}, fail(constant.ReasonNoCurrentRelease, "当前没有已发布配置", "")
 	}
 	if err != nil {
 		return ReleaseView{}, err
@@ -176,7 +176,7 @@ func (u *UseCase) Calculate(ctx context.Context, principal Principal, releaseID 
 	}
 	checked, err := domain.ValidateContent(rec.ContentCanonical, u.bounds)
 	if err != nil || checked.Doc == nil || len(checked.Issues) > 0 {
-		return domain.DeliveryPlan{}, fail(constant.CodeConfigurationUnavailable, "发布版本不可用", "")
+		return domain.DeliveryPlan{}, fail(constant.ReasonReleaseContent, "发布版本不可用", "")
 	}
 	plan, err := domain.BuildPlan(ctx, checked.Doc, rec.ReleaseID, rec.VersionNo, env, u.bounds)
 	if err != nil {
@@ -194,10 +194,10 @@ func (u *UseCase) Calculate(ctx context.Context, principal Principal, releaseID 
 func (u *UseCase) inspect(ctx context.Context, principal Principal, content []byte) (inspected, error) {
 	checked, err := domain.ValidateContent(content, u.bounds)
 	if err != nil {
-		return inspected{}, fail(constant.CodeInvalidRequest, "JSON 不是完整对象", "")
+		return inspected{}, fail(constant.ReasonInvalidJSON, "JSON 不是完整对象", "")
 	}
 	if !scopesAllow(principal, checked.Callers) {
-		return inspected{}, fail(constant.CodeForbidden, "调用方不在授权范围", "")
+		return inspected{}, fail(constant.ReasonCallerScopeDenied, "调用方不在授权范围", "")
 	}
 	if len(checked.Issues) > 0 {
 		return inspected{issues: checked.Issues, truncated: checked.Truncated}, nil
@@ -272,7 +272,7 @@ func (u *UseCase) loadForPlan(ctx context.Context, releaseID uint64) (data_inter
 	}
 	rec, err := u.repo.Load(ctx, releaseID)
 	if errors.Is(err, data_interface.ErrReleaseNotFound) {
-		return data_interface.ReleaseRecord{}, fail(constant.CodeConfigurationUnavailable, "发布版本不可用", "")
+		return data_interface.ReleaseRecord{}, fail(constant.ReasonReleaseContent, "发布版本不可用", "")
 	}
 	return rec, err
 }
@@ -326,10 +326,10 @@ func (u *UseCase) checkPayloads(ctx context.Context, doc *domain.ReleaseDocument
 
 func authorizeEvent(principal Principal, env domain.EventEnvelope) error {
 	if principal.CallerID != "" && principal.CallerID != env.CallerID {
-		return fail(constant.CodeForbidden, "调用方不在授权范围", "caller_id")
+		return fail(constant.ReasonCallerScopeDenied, "调用方不在授权范围", "caller_id")
 	}
 	if len(principal.AllowedSources) > 0 && !slices.Contains(principal.AllowedSources, env.SourceBusiness) {
-		return fail(constant.CodeForbidden, "来源不在授权范围", "source_business")
+		return fail(constant.ReasonSourceDenied, "来源不在授权范围", "source_business")
 	}
 	return nil
 }
@@ -345,10 +345,10 @@ func scopesAllow(principal Principal, callers []string) bool {
 
 func checkKeyReason(key, reason string) error {
 	if err := domain.ValidateExternalID("operation_idempotency_key", key); err != nil {
-		return fail(constant.CodeInvalidRequest, "操作键不合法", "operation_idempotency_key")
+		return fail(constant.ReasonInvalidFieldValue, "操作键不合法", "operation_idempotency_key")
 	}
 	if len(reason) < 1 || len(reason) > 1024 || !utf8.ValidString(reason) || blank(reason) {
-		return fail(constant.CodeInvalidRequest, "原因不合法", "reason")
+		return fail(constant.ReasonInvalidFieldValue, "原因不合法", "reason")
 	}
 	return nil
 }
@@ -365,7 +365,7 @@ func blank(s string) bool {
 func viewOf(rec data_interface.ReleaseRecord) (ReleaseView, error) {
 	version, err := domain.ReadFormatVersion(rec.ContentCanonical)
 	if err != nil {
-		return ReleaseView{}, fail(constant.CodeConfigurationUnavailable, "发布版本不可用", "")
+		return ReleaseView{}, fail(constant.ReasonReleaseContent, "发布版本不可用", "")
 	}
 	return ReleaseView{
 		ReleaseID: rec.ReleaseID, VersionNo: rec.VersionNo, Status: rec.Status,

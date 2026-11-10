@@ -13,7 +13,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 	if err != nil {
 		w.Header().Set("Content-Type", "application/json; charset=utf-8")
 		w.WriteHeader(http.StatusInternalServerError)
-		_, _ = w.Write([]byte(`{"error":{"code":"internal","message":"encode response failed"}}`))
+		_, _ = w.Write([]byte(`{"error":{"code":"internal","reason_code":"internal","category":"internal","message":"内部错误"}}`))
 		return
 	}
 	w.Header().Set("Content-Type", "application/json; charset=utf-8")
@@ -25,7 +25,7 @@ func writeJSON(w http.ResponseWriter, status int, v any) {
 func NotImplemented(w http.ResponseWriter, r *http.Request) {
 	err, createErr := domain.NewError(CodeNotImplemented, "接口尚未实现", "", nil)
 	if createErr != nil {
-		writeJSON(w, http.StatusNotImplemented, errorEnvelope{Error: errorBody{Code: CodeNotImplemented, Message: "接口尚未实现"}})
+		writeJSON(w, http.StatusNotImplemented, errorEnvelope{Error: errorBody{Code: CodeNotImplemented, ReasonCode: CodeNotImplemented, Category: "request", Message: "接口尚未实现"}})
 		return
 	}
 	WriteError(w, r, err)

@@ -58,7 +58,7 @@ func (s *ReleaseStore) CreateDraft(ctx context.Context, in data_interface.Create
 		}
 		next := maxVer.Int64 + 1
 		if next <= 0 || next > int64(^uint32(0)) {
-			return domainErr(constant.CodeLimitExceeded, "发布序号溢出")
+			return domainErr(constant.ReasonReleaseSequence, "发布序号溢出")
 		}
 		opID, err := newOperationID()
 		if err != nil {
@@ -137,24 +137,24 @@ func (s *ReleaseStore) Publish(ctx context.Context, in data_interface.PublishInp
 			return err
 		}
 		if status != "draft" {
-			return domainErr(constant.CodeStateConflict, "草稿不能再次发布")
+			return domainErr(constant.ReasonReleasePublished, "草稿不能再次发布")
 		}
 		if !fpVer.Valid || int(fpVer.Int64) != constant.FingerprintVersion || len(canon) == 0 || domainSHA(canon) != shaHex {
-			return domainErr(constant.CodeConfigurationUnavailable, "发布内容不可用")
+			return domainErr(constant.ReasonReleaseContent, "发布内容不可用")
 		}
 		stored, err := data_interface.UnmarshalReferences(snapshot)
 		if err != nil {
-			return domainErr(constant.CodeConfigurationUnavailable, "发布内容不可用")
+			return domainErr(constant.ReasonReleaseContent, "发布内容不可用")
 		}
 		live, err := loadLiveReferences(ctx, tx, stored)
 		if err != nil {
 			return err
 		}
 		if !data_interface.SameReferences(stored, live) {
-			return domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+			return domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 		}
 		if !samePointer(current, in.Expected) {
-			return domainErr(constant.CodeVersionConflict, "当前发布版本已变化")
+			return domainErr(constant.ReasonReleaseVersion, "当前发布版本已变化")
 		}
 		if current != nil {
 			res, err := tx.ExecContext(ctx, `
@@ -175,7 +175,7 @@ func (s *ReleaseStore) Publish(ctx context.Context, in data_interface.PublishInp
 			return err
 		}
 		if n, _ := res.RowsAffected(); n != 1 {
-			return domainErr(constant.CodeStateConflict, "草稿不能再次发布")
+			return domainErr(constant.ReasonReleasePublished, "草稿不能再次发布")
 		}
 		res, err = tx.ExecContext(ctx, `
 			UPDATE routing_current SET release_id = ?, updated_at = UTC_TIMESTAMP(6) WHERE singleton = 1`, in.ReleaseID)
@@ -272,7 +272,7 @@ func lockCurrent(ctx context.Context, tx *sql.Tx) error {
 	var id sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT release_id FROM routing_current WHERE singleton = 1 FOR UPDATE`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return domainErr(constant.CodeConfigurationUnavailable, "当前发布指针不存在")
+		return domainErr(constant.ReasonNoCurrentRelease, "当前发布指针不存在")
 	}
 	return err
 }
@@ -281,7 +281,7 @@ func lockCurrentID(ctx context.Context, tx *sql.Tx) (*uint64, error) {
 	var id sql.NullInt64
 	err := tx.QueryRowContext(ctx, `SELECT release_id FROM routing_current WHERE singleton = 1 FOR UPDATE`).Scan(&id)
 	if errors.Is(err, sql.ErrNoRows) {
-		return nil, domainErr(constant.CodeConfigurationUnavailable, "当前发布指针不存在")
+		return nil, domainErr(constant.ReasonNoCurrentRelease, "当前发布指针不存在")
 	}
 	if err != nil {
 		return nil, err
@@ -310,7 +310,7 @@ func readOperation(ctx context.Context, tx *sql.Tx, opType, key, fingerprint str
 		return nil, false, err
 	}
 	if storedFP != fingerprint {
-		return nil, false, domainErr(constant.CodeIdempotencyConflict, "相同操作键的参数不一致")
+		return nil, false, domainErr(constant.ReasonOperationKey, "相同操作键的参数不一致")
 	}
 	return result, true, nil
 }
@@ -341,7 +341,7 @@ func freezeReferences(ctx context.Context, tx *sql.Tx, bindings []domain.TargetB
 	for _, id := range ids {
 		pin, err := scanChannel(tx.QueryRowContext(ctx, channelSelect+` WHERE channel_id = ? FOR SHARE`, id), id)
 		if errors.Is(err, sql.ErrNoRows) {
-			return set, domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+			return set, domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 		}
 		if err != nil {
 			return set, err
@@ -353,7 +353,7 @@ func freezeReferences(ctx context.Context, tx *sql.Tx, bindings []domain.TargetB
 			if pin.ProviderID != binding.ProviderID || pin.ProviderAccountID != binding.ProviderAccountID ||
 				pin.Operation != binding.Operation || pin.AdapterType != binding.AdapterType ||
 				pin.AdapterVersion != binding.AdapterVersion || pin.CredentialRef != binding.CredentialRef {
-				return set, domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+				return set, domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 			}
 		}
 		set.Channels = append(set.Channels, pin)
@@ -370,7 +370,7 @@ func freezeReferences(ctx context.Context, tx *sql.Tx, bindings []domain.TargetB
 	for _, ref := range refs {
 		pin, err := scanCredential(tx.QueryRowContext(ctx, credentialSelect+` WHERE credential_ref = ? FOR SHARE`, ref), ref)
 		if errors.Is(err, sql.ErrNoRows) {
-			return set, domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+			return set, domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 		}
 		if err != nil {
 			return set, err
@@ -380,7 +380,7 @@ func freezeReferences(ctx context.Context, tx *sql.Tx, bindings []domain.TargetB
 				continue
 			}
 			if pin.ProviderID != binding.ProviderID || pin.ProviderAccountID != binding.ProviderAccountID {
-				return set, domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+				return set, domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 			}
 		}
 		set.Credentials = append(set.Credentials, pin)
@@ -398,7 +398,7 @@ func loadLiveReferences(ctx context.Context, tx *sql.Tx, stored data_interface.R
 	for _, id := range ids {
 		pin, err := scanChannel(tx.QueryRowContext(ctx, channelSelect+` WHERE channel_id = ? FOR SHARE`, id), id)
 		if errors.Is(err, sql.ErrNoRows) {
-			return live, domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+			return live, domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 		}
 		if err != nil {
 			return live, err
@@ -413,7 +413,7 @@ func loadLiveReferences(ctx context.Context, tx *sql.Tx, stored data_interface.R
 	for _, ref := range refs {
 		pin, err := scanCredential(tx.QueryRowContext(ctx, credentialSelect+` WHERE credential_ref = ? FOR SHARE`, ref), ref)
 		if errors.Is(err, sql.ErrNoRows) {
-			return live, domainErr(constant.CodeConfigurationChanged, "引用版本已变化，请重新校验")
+			return live, domainErr(constant.ReasonReferenceChanged, "引用版本已变化，请重新校验")
 		}
 		if err != nil {
 			return live, err
@@ -455,7 +455,7 @@ func scanRelease(row rowScanner) (data_interface.ReleaseRecord, error) {
 		return data_interface.ReleaseRecord{}, domainErr(constant.CodeInternal, "内部错误")
 	}
 	if len(canon) == 0 || !fp.Valid || int(fp.Int64) != constant.FingerprintVersion || domainSHA(canon) != sha {
-		return data_interface.ReleaseRecord{}, domainErr(constant.CodeConfigurationUnavailable, "发布内容不可用")
+		return data_interface.ReleaseRecord{}, domainErr(constant.ReasonReleaseContent, "发布内容不可用")
 	}
 	rec.ContentCanonical = canon
 	rec.ContentSHA256 = sha
@@ -516,7 +516,7 @@ func (s *ReleaseStore) readCommitted(ctx context.Context, opType, key, fingerpri
 		return nil, false, err
 	}
 	if storedFP != fingerprint {
-		return nil, false, domainErr(constant.CodeIdempotencyConflict, "相同操作键的参数不一致")
+		return nil, false, domainErr(constant.ReasonOperationKey, "相同操作键的参数不一致")
 	}
 	return result, true, nil
 }

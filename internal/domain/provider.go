@@ -129,8 +129,11 @@ func InterpretMockJSON(f TransportFacts) ProtocolResult {
 	if f.Status == 0 {
 		return unc(constant.ErrConnection)
 	}
-	if f.TooLarge || !f.ReadComplete {
-		return unc(constant.ErrProtocolInvalid)
+	if f.TooLarge {
+		return unc(constant.ErrResponseTooLarge)
+	}
+	if !f.ReadComplete {
+		return unc(constant.ErrResponseRead)
 	}
 	root, err := canonicaljson.Parse(f.Body)
 	if err != nil || root.Kind() != canonicaljson.KindObject {

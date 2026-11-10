@@ -66,23 +66,26 @@ type RetryCheck struct {
 	RiskAck        bool
 }
 
-// CheckRetry 返回是否需要风险授权，或标准错误码（无副作用）。
+// CheckRetry 返回是否需要风险授权，或精确原因码（无副作用）。
 func CheckRetry(c RetryCheck) (risk bool, code string) {
 	t := c.Task
 	switch t.Status {
 	case enums.TaskFailed, enums.TaskUnknown:
 	default:
-		return false, constant.CodeStateConflict
+		return false, constant.ReasonTaskNotRetryable
 	}
 	if t.CurrentAttemptID != nil || t.LeaseToken != "" {
-		return false, constant.CodeStateConflict
+		return false, constant.ReasonTaskLeaseActive
 	}
 	if t.RowVersion != c.ExpectedRow {
-		return false, constant.CodeVersionConflict
+		return false, constant.ReasonTaskVersion
 	}
 	if c.Constraint != "" {
-		if c.Constraint == constant.ErrConfigurationUnavail || c.Constraint == constant.ErrAdapterUnavailable {
-			return false, constant.CodeConfigurationUnavailable
+		if c.Constraint == constant.ErrConfigurationUnavail {
+			return false, constant.ReasonFrozenPolicy
+		}
+		if c.Constraint == constant.ErrAdapterUnavailable {
+			return false, constant.ReasonAdapterMissing
 		}
 		return false, constant.CodeChannelBlocked
 	}
@@ -106,7 +109,7 @@ func NarrowPolicy(orig FrozenPolicy, maxAttempts uint32, maxTimeout time.Duratio
 		out.RoundTimeout, changed = maxTimeout, true
 	}
 	if out.MaxAttempts == 0 || out.RoundTimeout <= out.BackoffInitial {
-		return FrozenPolicy{}, false, codeErr(constant.CodeConfigurationUnavailable, "当前允许策略无法满足原协议", "round_policy")
+		return FrozenPolicy{}, false, codeErr(constant.ReasonPolicyIncompatible, "当前允许策略无法满足原协议", "round_policy")
 	}
 	return out, changed, nil
 }
@@ -133,50 +136,53 @@ func ValidateEvidenceShape(ev Evidence, maxAttempts int) string {
 	switch ev.Type {
 	case "provider_confirmation", "provider_query", "manual_verification":
 	default:
-		return constant.CodeEvidenceInvalid
+		return constant.ReasonEvidenceType
 	}
 	if ev.Reference == "" || len(ev.Reference) > 191 || strings.TrimSpace(ev.Summary) == "" || len(ev.Summary) > 2048 {
-		return constant.CodeEvidenceInvalid
+		return constant.ReasonEvidenceReference
 	}
 	if LooksSecret(ev.Reference) || LooksSecret(ev.Summary) {
-		return constant.CodeEvidenceInvalid
+		return constant.ReasonEvidenceSecret
 	}
 	switch ev.Scope {
 	case EvidenceScopeAttempts:
 		if len(ev.CoveredAttemptIDs) == 0 || ev.IdempotencyKey != "" || len(ev.CoveredAttemptIDs) > maxAttempts {
-			return constant.CodeEvidenceInvalid
+			return constant.ReasonEvidenceAttempts
 		}
 		seen := map[uint64]bool{}
 		for _, id := range ev.CoveredAttemptIDs {
 			if seen[id] {
-				return constant.CodeEvidenceInvalid
+				return constant.ReasonEvidenceDuplicate
 			}
 			seen[id] = true
 		}
 	case EvidenceScopeBusiness:
 		if ev.IdempotencyKey == "" || len(ev.CoveredAttemptIDs) > 0 {
-			return constant.CodeEvidenceInvalid
+			return constant.ReasonEvidenceAttempts
 		}
 	default:
-		return constant.CodeEvidenceInvalid
+		return constant.ReasonEvidenceScope
 	}
 	return ""
 }
 
 // CheckResolve 在锁定任务后重新计算待覆盖集合（OPS-V01、§8）。attempts 为该任务全部历史尝试。
 func CheckResolve(t TaskFacts, idempotencyKey string, attempts []AttemptRef, expectedRow uint32, resolution string, ev Evidence) string {
-	if t.Status != enums.TaskUnknown || t.CurrentAttemptID != nil || t.LeaseToken != "" {
-		return constant.CodeStateConflict
+	if t.Status != enums.TaskUnknown {
+		return constant.ReasonTaskNotUnknown
+	}
+	if t.CurrentAttemptID != nil || t.LeaseToken != "" {
+		return constant.ReasonTaskLeaseActive
 	}
 	if t.RowVersion != expectedRow {
-		return constant.CodeVersionConflict
+		return constant.ReasonTaskVersion
 	}
 	if resolution != string(enums.TaskSucceeded) && resolution != string(enums.TaskFailed) {
-		return constant.CodeInvalidRequest
+		return constant.ReasonResolutionInvalid
 	}
 	if ev.Scope == EvidenceScopeBusiness {
 		if ev.IdempotencyKey != idempotencyKey {
-			return constant.CodeEvidenceInvalid
+			return constant.ReasonEvidenceBusinessKey
 		}
 		return ""
 	}
@@ -187,7 +193,7 @@ func CheckResolve(t TaskFacts, idempotencyKey string, attempts []AttemptRef, exp
 	covered := map[uint64]bool{}
 	for _, id := range ev.CoveredAttemptIDs {
 		if !owned[id] {
-			return constant.CodeEvidenceInvalid
+			return constant.ReasonEvidenceForeignAttempt
 		}
 		covered[id] = true
 	}

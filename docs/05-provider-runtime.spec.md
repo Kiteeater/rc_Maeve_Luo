@@ -179,7 +179,7 @@ safety_basis 为 `NOT_NEEDED / PROVIDER_IDEMPOTENCY / MANUAL_FIRST_ATTEMPT`。�
 | `PROVIDER_MAX_IDLE_CONNECTIONS` | 100 | 1～1000；每主机上限不超过执行并行数 |
 | `PROVIDER_IDLE_TIMEOUT` | 90 秒 | 10～300 秒 |
 
-HTTP response body 读取超限、非法 JSON、缺必需接收字段，统一为 `PROTOCOL_INVALID_RESPONSE` 并按实际证据判断不确定性；不会因 2xx 就成功。Retry-After 支持非负十进制秒数或 HTTP 日期，依据响应接收时刻换算，计划时间最终按数据库 UTC 复核，过去值按当前时间；超过策略允许上限时保存原建议并 BLOCK 到有界检查或本轮截止，不能截断后提前违反供应商强制等待。响应超限读取第 N+1 字节时，实际已读计 N+1，摘要另按白名单截断。
+HTTP response body 读取超限使用 `RESPONSE_TOO_LARGE`，读取失败使用 `RESPONSE_READ_ERROR`，非法 JSON 或缺必需接收字段使用 `PROTOCOL_INVALID_RESPONSE`；网络超时在协议解释后仍保留 `HTTP_TIMEOUT`。这些错误按实际证据判断不确定性，不会因 2xx 就成功。共享限流器不可用使用 `RATE_LIMITER_UNAVAILABLE`，与额度不足的 `RATE_LIMIT_WAIT` 区分。分类和标准消息见 [错误码体系](09-error-codes.md)。Retry-After 支持非负十进制秒数或 HTTP 日期，依据响应接收时刻换算，计划时间最终按数据库 UTC 复核，过去值按当前时间；超过策略允许上限时保存原建议并 BLOCK 到有界检查或本轮截止，不能截断后提前违反供应商强制等待。响应超限读取第 N+1 字节时，实际已读计 N+1，摘要另按白名单截断。
 
 ## 11. 首版模拟协议和故障注入
 

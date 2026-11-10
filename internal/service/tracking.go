@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"notifier/internal/biz/biz_tracking"
+	"notifier/internal/constant"
 	"notifier/internal/domain"
 )
 
@@ -25,7 +26,7 @@ func (s *TrackingService) principal(w http.ResponseWriter, r *http.Request) (biz
 	params := biz_tracking.Params{}
 	for k, vs := range r.URL.Query() {
 		if len(vs) != 1 {
-			de, _ := domain.NewError(CodeInvalidRequest, "查询参数重复", k, nil)
+			de, _ := domain.NewError(constant.ReasonDuplicateQuery, "查询参数重复", k, nil)
 			WriteError(w, r, de)
 			return biz_tracking.Principal{}, nil, false
 		}
@@ -54,7 +55,7 @@ func reply[T any](w http.ResponseWriter, r *http.Request, v T, err error) {
 
 func noParams(w http.ResponseWriter, r *http.Request, in biz_tracking.Params) bool {
 	for k := range in {
-		de, _ := domain.NewError(CodeInvalidRequest, "详情不接受查询参数", k, nil)
+		de, _ := domain.NewError(constant.ReasonUnknownQuery, "详情不接受查询参数", k, nil)
 		WriteError(w, r, de)
 		return false
 	}

@@ -116,13 +116,29 @@ func validReason(reason string) bool {
 	return strings.TrimSpace(reason) != "" && len(reason) <= 1024 && !domain.LooksSecret(reason)
 }
 
+func validateRequest(key string, expectedRow uint32, reason string) error {
+	field := ""
+	switch {
+	case key == "" || len(key) > 191:
+		field = "operation_idempotency_key"
+	case expectedRow == 0:
+		field = "expected_row_version"
+	case !validReason(reason):
+		field = "reason"
+	default:
+		return nil
+	}
+	err, _ := domain.NewError(constant.ReasonInvalidFieldValue, "", field, nil)
+	return err
+}
+
 // Retry 实现 OPS-R01..R03。
 func (u *UseCase) Retry(ctx context.Context, p Principal, id uint64, req RetryRequest) (Result, error) {
 	if !p.allows(constant.PermDeliveriesRetry) {
 		return Result{}, errOf(constant.CodeForbidden, "无权限")
 	}
-	if req.Key == "" || len(req.Key) > 191 || req.ExpectedRow == 0 || !validReason(req.Reason) {
-		return Result{}, errOf(constant.CodeInvalidRequest, "请求参数不合法")
+	if err := validateRequest(req.Key, req.ExpectedRow, req.Reason); err != nil {
+		return Result{}, err
 	}
 	task, err := u.loadScoped(ctx, p, id)
 	if err != nil {
@@ -148,7 +164,7 @@ func (u *UseCase) Retry(ctx context.Context, p Principal, id uint64, req RetryRe
 	}
 	orig, err := domain.ParseFrozenPolicy(task.RoundPolicy)
 	if err != nil {
-		return Result{}, errOf(constant.CodeConfigurationUnavailable, "原轮次策略不可读")
+		return Result{}, errOf(constant.ReasonFrozenPolicy, "原轮次策略不可读")
 	}
 	policy, narrowed, err := domain.NarrowPolicy(orig, u.Config.MaxAllowedAttempts, u.Config.MaxRoundTimeout)
 	if err != nil {
@@ -177,9 +193,12 @@ func (u *UseCase) Resolve(ctx context.Context, p Principal, id uint64, req Resol
 	if !p.allows(constant.PermDeliveriesResolve) {
 		return Result{}, errOf(constant.CodeForbidden, "无权限")
 	}
-	if req.Key == "" || len(req.Key) > 191 || req.ExpectedRow == 0 || !validReason(req.Reason) ||
-		(req.Resolution != "SUCCEEDED" && req.Resolution != "FAILED") {
-		return Result{}, errOf(constant.CodeInvalidRequest, "请求参数不合法")
+	if err := validateRequest(req.Key, req.ExpectedRow, req.Reason); err != nil {
+		return Result{}, err
+	}
+	if req.Resolution != "SUCCEEDED" && req.Resolution != "FAILED" {
+		err, _ := domain.NewError(constant.ReasonResolutionInvalid, "", "resolution", nil)
+		return Result{}, err
 	}
 	if req.Evidence.Scope == "" {
 		if len(req.Evidence.CoveredAttemptIDs) > 0 {
@@ -226,7 +245,7 @@ func (u *UseCase) replayed(ctx context.Context, scope, opType, key, fp string) (
 		return Result{}, false, err
 	}
 	if op.Fingerprint != fp {
-		return Result{}, true, errOf(constant.CodeIdempotencyConflict, "相同操作键的参数不一致")
+		return Result{}, true, errOf(constant.ReasonOperationKey, "相同操作键的参数不一致")
 	}
 	return Result{Body: op.Result, Replayed: true}, true, nil
 }
@@ -244,7 +263,7 @@ func (u *UseCase) settle(ctx context.Context, scope, opType, key, fp string, bod
 			return r, rerr
 		}
 		if errors.Is(err, data_interface.ErrOperationKeyTaken) {
-			return Result{}, errOf(constant.CodeIdempotencyConflict, "操作键已被占用")
+			return Result{}, errOf(constant.ReasonOperationKeyTaken, "操作键已被占用")
 		}
 		return Result{}, errOf(constant.CodeOperationUnconfirmed, "操作结果无法确认，请用原键原参数重试")
 	default:

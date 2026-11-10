@@ -165,6 +165,32 @@ func codeOf(err error) string {
 	return ""
 }
 
+func TestDiagnosticCategoriesAreVisibleWithoutChangingStoredCodes(t *testing.T) {
+	cases := []struct {
+		code     string
+		category string
+	}{
+		{constant.ErrHTTPTimeout, "transport"},
+		{constant.ErrRateLimiterDown, "dependency"},
+		{constant.ErrRateLimitWait, "quota"},
+		{constant.ErrCredentialRevoked, "credential"},
+		{"LEGACY_UNREGISTERED_CODE", "unknown"},
+	}
+	for _, tc := range cases {
+		attempt := biz_tracking.NewAttemptView(data_interface.AttemptRow{AttemptRecord: data_interface.AttemptRecord{ErrorCode: tc.code}})
+		delivery := biz_tracking.NewDeliveryView(data_interface.DeliveryRow{Task: data_interface.TaskRecord{LastErrorCode: tc.code}})
+		if attempt.ErrorCategory == nil || *attempt.ErrorCategory != tc.category || attempt.ErrorCode == nil || *attempt.ErrorCode != tc.code {
+			t.Fatalf("attempt classification = %+v", attempt)
+		}
+		if delivery.LastErrorCategory == nil || *delivery.LastErrorCategory != tc.category || delivery.LastErrorCode == nil || *delivery.LastErrorCode != tc.code {
+			t.Fatalf("delivery classification = %+v", delivery)
+		}
+	}
+	if biz_tracking.NewAttemptView(data_interface.AttemptRow{}).ErrorCategory != nil || biz_tracking.NewDeliveryView(data_interface.DeliveryRow{}).LastErrorCategory != nil {
+		t.Fatal("no error must keep a null category")
+	}
+}
+
 func TestTRK01ScopedExactFilters(t *testing.T) {
 	s := &store{rows: []data_interface.DeliveryRow{
 		row(3, "crm", "sms", enums.TaskRetryWait, now.Add(-time.Hour)),

@@ -4,7 +4,7 @@
 | --- | --- |
 | 版本 | v0.2 |
 | 状态 | 开发规格；仓库已有 S00～S08 对应实现与测试 |
-| 依据 | [PRD v0.3](../PRD.md)、[TECH_DESIGN v0.5](../TECH_DESIGN.md) |
+| 依据 | [PRD v0.3](../PRD.md)、[TECH_DESIGN v0.6](../TECH_DESIGN.md) |
 | 组织方式 | 1 份共享契约 + 8 份能力 spec；以开发批次交付完整链路 |
 
 本目录集中保存首版开发规格。模块编号用于引用，不代表必须按编号逐个完整实现。文中的“必须”是实现及验收要求；HTTP 状态码、配置格式和内部操作名称等技术方案未展开的部分，是本次细化的首版拟定契约。
@@ -18,6 +18,7 @@ v0.2 将规格细化为字段/参数表、领域端口、完整事务、失败�
 | 编号 | 文档 | 负责的行为 | 建议代码位置 |
 | --- | --- | --- | --- |
 | S00 | [共享契约](00-shared-contracts.md) | 标识、快照、版本、结果、事务、权限、时间和通用错误 | 跨模块约定，不要求创建公共大包 |
+| ERR | [错误码体系](09-error-codes.md) | 精确业务原因、统一分类与消息、HTTP 兼容及异步投递诊断 | `constant`、`domain`、`service` |
 | S01 | [配置发布与计划计算](01-configuration-release.spec.md) | 不可变配置发布、路由、映射、固定计划计算 | `biz/biz_config`、`domain`、`data/mysql` |
 | S02 | [事件受理](02-event-ingestion.spec.md) | 事件校验、提交幂等、原子保存分发计划 | `service`、`biz/biz_event`、`data/mysql` |
 | S03 | [投递状态与执行](03-delivery-processing.spec.md) | 状态机、领取、尝试、预算、执行和 ACK 协调 | `server` 后台入口、`biz/biz_delivery`、`domain` |

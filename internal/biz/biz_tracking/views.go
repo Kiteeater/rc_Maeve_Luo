@@ -37,6 +37,16 @@ func str(s string) *string {
 	return &s
 }
 
+func errorCategory(code string) *string {
+	if code == "" {
+		return nil
+	}
+	if definition, ok := domain.LookupError(code); ok {
+		return str(definition.Category)
+	}
+	return str("unknown")
+}
+
 // PolicyView 是任务冻结策略。
 type PolicyView struct {
 	MaxAttempts          uint32 `json:"max_attempts"`
@@ -83,6 +93,7 @@ type DeliveryView struct {
 	RoundDeadlineAt     string      `json:"round_deadline_at"`
 	RoundFinishedAt     *string     `json:"round_finished_at"`
 	LastErrorCode       *string     `json:"last_error_code"`
+	LastErrorCategory   *string     `json:"last_error_category"`
 	LastErrorReason     *string     `json:"last_error_reason"`
 	LastErrorTruncated  bool        `json:"last_error_truncated"`
 	BlockedReason       *string     `json:"blocked_reason"`
@@ -109,7 +120,7 @@ func NewDeliveryView(r data_interface.DeliveryRow) DeliveryView {
 		LastAttemptID: idPtr(t.LastAttemptID), CurrentAttemptID: idPtr(t.CurrentAttemptID),
 		ScheduledAt: ts(t.ScheduledAt), NextRetryAt: ts(t.NextRetryAt), NextCheckAt: ts(t.NextCheckAt),
 		RoundDeadlineAt: tsv(t.RoundDeadlineAt), RoundFinishedAt: ts(t.RoundFinishedAt),
-		LastErrorCode: str(t.LastErrorCode), LastErrorReason: str(t.LastErrorReason), LastErrorTruncated: t.LastErrorTruncated,
+		LastErrorCode: str(t.LastErrorCode), LastErrorCategory: errorCategory(t.LastErrorCode), LastErrorReason: str(t.LastErrorReason), LastErrorTruncated: t.LastErrorTruncated,
 		BlockedReason: str(t.BlockedReason), BlockedSince: ts(t.BlockedSince), UnresolvedAttempts: []string{},
 		NeedsManualAction: domain.NeedsManualAction(t.Status, r.Escalated),
 		CreatedAt:         ts(&r.CreatedAt), UpdatedAt: ts(&r.UpdatedAt),
@@ -194,6 +205,7 @@ type AttemptView struct {
 	ResultCertainty    *string         `json:"result_certainty"`
 	Retryable          *bool           `json:"retryable"`
 	ErrorCode          *string         `json:"error_code"`
+	ErrorCategory      *string         `json:"error_category"`
 	ErrorReason        *string         `json:"error_reason"`
 	ErrorTruncated     bool            `json:"error_summary_truncated"`
 	ProviderWaitHint   *string         `json:"provider_wait_hint"`
@@ -224,7 +236,7 @@ func NewAttemptView(a data_interface.AttemptRow) AttemptView {
 		ProviderCode: str(a.ProviderCode), ProviderRequestID: str(a.ProviderRequestID), ResponseSizeBytes: a.ResponseSize,
 		ResponseSummary: str(a.ResponseSummary), ResponseTruncated: a.ResponseTruncated, BodyTruncated: a.BodyTruncated,
 		Outcome: str(string(a.Outcome)), ResultCertainty: str(string(a.ResultCertainty)),
-		ErrorCode: str(a.ErrorCode), ErrorReason: str(a.ErrorReason), ErrorTruncated: a.ErrorTruncated,
+		ErrorCode: str(a.ErrorCode), ErrorCategory: errorCategory(a.ErrorCode), ErrorReason: str(a.ErrorReason), ErrorTruncated: a.ErrorTruncated,
 		ProviderWaitHint: str(a.ProviderWaitHint), StartedAt: tsv(a.StartedAt), RequestStartedAt: ts(a.RequestStartedAt),
 		ResponseReceivedAt: ts(a.ResponseReceivedAt), FinishedAt: ts(a.FinishedAt),
 		HTTPDurationMs: ms(a.HTTPDuration), AttemptDurationMs: ms(a.AttemptDuration), TimingIncomplete: a.TimingIncomplete,

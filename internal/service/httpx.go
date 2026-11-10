@@ -7,47 +7,51 @@ import (
 	"strings"
 
 	"notifier/internal/canonicaljson"
+	"notifier/internal/constant"
 	"notifier/internal/domain"
 )
 
 // 错误码与 HTTP 状态的对应关系见 S00 第 8 节。未知码按 internal/500 处理。
 const (
-	CodeInvalidRequest           = "invalid_request"
-	CodeInvalidCursor            = "invalid_cursor"
-	CodeUnauthenticated          = "unauthenticated"
-	CodeForbidden                = "forbidden"
-	CodeNotFound                 = "not_found"
-	CodeIdempotencyConflict      = "idempotency_conflict"
-	CodeVersionConflict          = "version_conflict"
-	CodeStateConflict            = "state_conflict"
-	CodePayloadTooLarge          = "payload_too_large"
-	CodeUnsupportedMediaType     = "unsupported_media_type"
-	CodeUnsupportedSchema        = "unsupported_schema"
-	CodeNoMatchingRoute          = "no_matching_route"
-	CodeMappingInvalid           = "mapping_invalid"
-	CodeUnsafeReplay             = "unsafe_replay"
-	CodeRateLimited              = "rate_limited"
-	CodeDependencyUnavailable    = "dependency_unavailable"
-	CodeAdmissionPaused          = "admission_paused"
-	CodeInternal                 = "internal"
-	CodeNotImplemented           = "not_implemented"
-	CodeConfigInvalid            = "config_invalid"
-	CodeConfigurationChanged     = "configuration_changed"
-	CodeConfigurationUnavailable = "configuration_unavailable"
-	CodePlanTimeout              = "plan_timeout"
-	CodeLimitExceeded            = "limit_exceeded"
-	CodeEventDataInvalid         = "event_data_invalid"
-	CodeFanoutExceeded           = "fanout_exceeded"
-	CodeAcceptanceUnconfirmed    = "acceptance_unconfirmed"
-	CodeQueryTimeout             = "query_timeout"
-	CodeEvidenceInsufficient     = "evidence_insufficient"
-	CodeEvidenceInvalid          = "evidence_invalid"
-	CodeChannelBlocked           = "channel_blocked"
-	CodeOperationUnconfirmed     = "operation_unconfirmed"
+	CodeInvalidRequest           = constant.CodeInvalidRequest
+	CodeInvalidCursor            = constant.CodeInvalidCursor
+	CodeUnauthenticated          = constant.CodeUnauthenticated
+	CodeForbidden                = constant.CodeForbidden
+	CodeNotFound                 = constant.CodeNotFound
+	CodeIdempotencyConflict      = constant.CodeIdempotencyConflict
+	CodeVersionConflict          = constant.CodeVersionConflict
+	CodeStateConflict            = constant.CodeStateConflict
+	CodePayloadTooLarge          = constant.CodePayloadTooLarge
+	CodeUnsupportedMediaType     = constant.CodeUnsupportedMediaType
+	CodeUnsupportedSchema        = constant.CodeUnsupportedSchema
+	CodeNoMatchingRoute          = constant.CodeNoMatchingRoute
+	CodeMappingInvalid           = constant.CodeMappingInvalid
+	CodeUnsafeReplay             = constant.CodeUnsafeReplay
+	CodeRateLimited              = constant.CodeRateLimited
+	CodeDependencyUnavailable    = constant.CodeDependencyUnavailable
+	CodeAdmissionPaused          = constant.CodeAdmissionPaused
+	CodeInternal                 = constant.CodeInternal
+	CodeNotImplemented           = constant.CodeNotImplemented
+	CodeConfigInvalid            = constant.CodeConfigInvalid
+	CodeConfigurationChanged     = constant.CodeConfigurationChanged
+	CodeConfigurationUnavailable = constant.CodeConfigurationUnavailable
+	CodePlanTimeout              = constant.CodePlanTimeout
+	CodeLimitExceeded            = constant.CodeLimitExceeded
+	CodeEventDataInvalid         = constant.CodeEventDataInvalid
+	CodeFanoutExceeded           = constant.CodeFanoutExceeded
+	CodeAcceptanceUnconfirmed    = constant.CodeAcceptanceUnconfirmed
+	CodeQueryTimeout             = constant.CodeQueryTimeout
+	CodeEvidenceInsufficient     = constant.CodeEvidenceInsufficient
+	CodeEvidenceInvalid          = constant.CodeEvidenceInvalid
+	CodeChannelBlocked           = constant.CodeChannelBlocked
+	CodeOperationUnconfirmed     = constant.CodeOperationUnconfirmed
 )
 
 // StatusOf 返回稳定错误码对应的 HTTP 状态。
 func StatusOf(code string) int {
+	if definition, ok := domain.LookupError(code); ok {
+		code = definition.Code
+	}
 	switch code {
 	case CodeInvalidRequest, CodeInvalidCursor:
 		return http.StatusBadRequest
@@ -82,11 +86,13 @@ type errorEnvelope struct {
 }
 
 type errorBody struct {
-	Code      string       `json:"code"`
-	Message   string       `json:"message"`
-	FieldPath string       `json:"field_path,omitempty"`
-	RequestID string       `json:"request_id,omitempty"`
-	Details   []detailBody `json:"details,omitempty"`
+	Code       string       `json:"code"`
+	ReasonCode string       `json:"reason_code"`
+	Category   string       `json:"category"`
+	Message    string       `json:"message"`
+	FieldPath  string       `json:"field_path,omitempty"`
+	RequestID  string       `json:"request_id,omitempty"`
+	Details    []detailBody `json:"details,omitempty"`
 }
 
 type detailBody struct {
@@ -95,7 +101,7 @@ type detailBody struct {
 	Message   string `json:"message"`
 }
 
-// WriteError 按领域错误写出 envelope。message 使用领域错误里的安全文本。
+// WriteError 保留通用 code，并补充精确原因和分类；未知错误和内部错误统一隐藏原始明细。
 func WriteError(w http.ResponseWriter, r *http.Request, err error) {
 	writeErrorStatus(w, r, err, StatusOf)
 }
@@ -106,11 +112,21 @@ func writeErrorStatus(w http.ResponseWriter, r *http.Request, err error, statusO
 	if !errors.As(err, &de) || de == nil {
 		de = &domain.Error{Code: CodeInternal, Message: "内部错误"}
 	}
-	code := de.Code
-	if StatusOf(code) == http.StatusInternalServerError && code != CodeInternal {
-		code = CodeInternal
+	reasonCode := de.ReasonCode
+	if reasonCode == "" {
+		reasonCode = de.Code
 	}
-	body := errorBody{Code: code, Message: de.Message, FieldPath: de.FieldPath}
+	definition, known := domain.LookupError(reasonCode)
+	if !known || definition.Code != de.Code || StatusOf(de.Code) == http.StatusInternalServerError {
+		de = &domain.Error{Code: CodeInternal}
+		reasonCode = CodeInternal
+		definition, _ = domain.LookupError(CodeInternal)
+	}
+	message := de.Message
+	if reasonCode != de.Code || message == "" {
+		message = definition.Message
+	}
+	body := errorBody{Code: de.Code, ReasonCode: reasonCode, Category: definition.Category, Message: message, FieldPath: de.FieldPath}
 	if r != nil {
 		body.RequestID = RequestIDFrom(r.Context())
 	}
@@ -120,7 +136,7 @@ func writeErrorStatus(w http.ResponseWriter, r *http.Request, err error, statusO
 			body.Details[i] = detailBody{FieldPath: item.FieldPath, Code: item.Code, Message: item.Message}
 		}
 	}
-	writeJSON(w, statusOf(code), errorEnvelope{Error: body})
+	writeJSON(w, statusOf(de.Code), errorEnvelope{Error: body})
 }
 
 // CheckContentType 只接受 application/json，可选 charset=utf-8。
@@ -161,7 +177,7 @@ func ReadBody(r *http.Request, maxBytes int64) ([]byte, error) {
 	limited := io.LimitReader(r.Body, maxBytes+1)
 	body, err := io.ReadAll(limited)
 	if err != nil {
-		de, _ := domain.NewError(CodeInvalidRequest, "无法读取请求体", "", nil)
+		de, _ := domain.NewError(constant.ReasonBodyUnreadable, "无法读取请求体", "", nil)
 		return nil, de
 	}
 	if int64(len(body)) > maxBytes {
@@ -175,12 +191,12 @@ func ReadBody(r *http.Request, maxBytes int64) ([]byte, error) {
 func RejectUnknownFields(raw []byte, allowed []string) error {
 	value, err := canonicaljson.ParseObject(raw)
 	if err != nil {
-		de, _ := domain.NewError(CodeInvalidRequest, "JSON 不是完整对象", "", nil)
+		de, _ := domain.NewError(constant.ReasonInvalidJSON, "JSON 不是完整对象", "", nil)
 		return de
 	}
 	fields, ok := value.Object()
 	if !ok {
-		de, _ := domain.NewError(CodeInvalidRequest, "JSON 不是完整对象", "", nil)
+		de, _ := domain.NewError(constant.ReasonInvalidJSON, "JSON 不是完整对象", "", nil)
 		return de
 	}
 	allow := make(map[string]struct{}, len(allowed))
@@ -189,7 +205,7 @@ func RejectUnknownFields(raw []byte, allowed []string) error {
 	}
 	for _, field := range fields {
 		if _, ok := allow[field.Key]; !ok {
-			de, _ := domain.NewError(CodeInvalidRequest, "请求包含未知字段", field.Key, nil)
+			de, _ := domain.NewError(constant.ReasonUnknownField, "请求包含未知字段", field.Key, nil)
 			return de
 		}
 	}
@@ -205,11 +221,11 @@ func RejectQuery(r *http.Request, allowed []string) error {
 	}
 	for key, values := range query {
 		if _, ok := allow[key]; !ok {
-			de, _ := domain.NewError(CodeInvalidRequest, "未知查询参数", key, nil)
+			de, _ := domain.NewError(constant.ReasonUnknownQuery, "未知查询参数", key, nil)
 			return de
 		}
 		if len(values) > 1 {
-			de, _ := domain.NewError(CodeInvalidRequest, "查询参数重复", key, nil)
+			de, _ := domain.NewError(constant.ReasonDuplicateQuery, "查询参数重复", key, nil)
 			return de
 		}
 	}

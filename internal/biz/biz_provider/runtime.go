@@ -56,7 +56,7 @@ func (r *Runtime) Prepare(ctx context.Context, in data_interface.PrepareRequest)
 	resp := pre
 	ok, notBefore, err := r.Limiter.Take(ctx, ch.QuotaKey, ch.RatePerSecond, ch.Burst, ch.PolicyVersion)
 	if err != nil {
-		return data_interface.PrepareResponse{Kind: domain.PrepareWait, ErrorCode: constant.ErrRateLimitWait,
+		return data_interface.PrepareResponse{Kind: domain.PrepareWait, ErrorCode: constant.ErrRateLimiterDown,
 			Reason: "限流器不可用，暂停发送", RateLimitUntil: now.Add(r.Config.LimiterRetry)}, nil
 	}
 	if !ok {
@@ -190,8 +190,15 @@ func (r *Runtime) Interpret(_ context.Context, task data_interface.TaskRecord, _
 		Outcome: pr.Outcome, Certainty: pr.Certainty, Retryable: pr.Retryable, ErrorCode: pr.ErrorCode,
 		ProviderRequestID: pr.ProviderRequestID, SupplierNotBefore: pr.WaitUntil,
 	}
-	if pr.ErrorCode != "" {
-		out.ErrorReason = "provider code " + pr.ProviderCode
+	if out.ErrorCode == constant.ErrConnection && sent.ErrorCode == constant.ErrHTTPTimeout {
+		out.ErrorCode = constant.ErrHTTPTimeout
+	}
+	if out.ErrorCode != "" {
+		if definition, ok := domain.LookupError(out.ErrorCode); ok {
+			out.ErrorReason = definition.Message
+		} else {
+			out.ErrorReason = "供应商请求结果无法分类，需人工核对"
+		}
 	}
 	ft, err := domain.ParseFixedTarget(task.FixedTarget)
 	if err == nil && pr.Outcome == enums.OutcomeReceived && ft.IdemMode == "key" {

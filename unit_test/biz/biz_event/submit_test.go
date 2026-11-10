@@ -16,6 +16,29 @@ import (
 
 const policyJSON = `{"backoff_cap_ms":60000,"backoff_initial_ms":1000,"max_attempts":8,"round_timeout_seconds":86400,"server_wait_cap_seconds":3600}`
 
+func TestInvalidEventEnvelopeHasPreciseReasons(t *testing.T) {
+	cases := []struct {
+		body, reason, path string
+	}{
+		{`invalid`, constant.ReasonInvalidJSON, ""},
+		{`{"source_business":"user-service"}`, constant.ReasonMissingField, "source_event_id"},
+		{`{"source_business":"user-service","source_event_id":2}`, constant.ReasonInvalidFieldType, "source_event_id"},
+		{`{"source_business":"user-service","unexpected":true}`, constant.ReasonUnknownField, "unexpected"},
+	}
+	for _, tc := range cases {
+		repo := &memEvents{}
+		uc := newUC(t, repo, &fakePlan{plan: twoTargetPlan(1)}, &fakeRelease{id: 1, hash: hash64()}, &fakeBacklog{}, openLimits())
+		_, err := uc.Submit(context.Background(), principal(), []byte(tc.body))
+		var de *domain.Error
+		if !errors.As(err, &de) || de.Code != constant.CodeInvalidRequest || de.ReasonCode != tc.reason || de.FieldPath != tc.path {
+			t.Fatalf("reason %s: %v", tc.reason, err)
+		}
+		if repo.accepts != 0 {
+			t.Fatal("invalid envelope must not create an event")
+		}
+	}
+}
+
 func TestEVT02_ConcurrentIdenticalRequestsOnePlan(t *testing.T) {
 	repo := &memEvents{}
 	uc := newUC(t, repo, &fakePlan{plan: twoTargetPlan(1)}, &fakeRelease{id: 1, hash: hash64()}, &fakeBacklog{}, openLimits())
@@ -78,6 +101,10 @@ func TestEVT04_MaterialChangeConflicts(t *testing.T) {
 		_, err := uc.Submit(context.Background(), principal(), body)
 		if codeOf(err) != constant.CodeIdempotencyConflict {
 			t.Fatalf("code = %s err %v", codeOf(err), err)
+		}
+		var de *domain.Error
+		if !errors.As(err, &de) || de.ReasonCode != constant.ReasonEventIDConflict {
+			t.Fatalf("event conflict reason = %v", err)
 		}
 	}
 	if repo.accepts != 1 || repo.events != 1 {
@@ -153,12 +180,20 @@ func TestEVT09_BacklogWithinLimitPersistsAndOverLimitPauses(t *testing.T) {
 	if codeOf(err) != constant.CodeAdmissionPaused || over.accepts != 0 {
 		t.Fatalf("over = %v accepts %d", err, over.accepts)
 	}
+	var countError *domain.Error
+	if !errors.As(err, &countError) || countError.ReasonCode != constant.ReasonBacklogCount {
+		t.Fatalf("count threshold reason = %v", err)
+	}
 	old := time.Now().Add(-2 * time.Hour)
 	aged := &memEvents{}
 	agedUC := newUC(t, aged, &fakePlan{plan: twoTargetPlan(1)}, &fakeRelease{id: 1, hash: hash64()}, &fakeBacklog{n: 0, oldest: &old}, limits)
 	_, err = agedUC.Submit(context.Background(), principal(), body)
 	if codeOf(err) != constant.CodeAdmissionPaused || aged.accepts != 0 {
 		t.Fatalf("aged = %v accepts %d", err, aged.accepts)
+	}
+	var ageError *domain.Error
+	if !errors.As(err, &ageError) || ageError.ReasonCode != constant.ReasonBacklogAge {
+		t.Fatalf("age threshold reason = %v", err)
 	}
 }
 

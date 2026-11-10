@@ -68,6 +68,10 @@ const (
 // 领域错误码。HTTP 映射在 service。未知码不得当成成功。
 const (
 	CodeInvalidRequest           = "invalid_request"
+	CodeUnauthenticated          = "unauthenticated"
+	CodeUnsupportedMediaType     = "unsupported_media_type"
+	CodeRateLimited              = "rate_limited"
+	CodeNotImplemented           = "not_implemented"
 	CodeInvalidCursor            = "invalid_cursor"
 	CodeQueryTimeout             = "query_timeout"
 	CodeForbidden                = "forbidden"

@@ -151,13 +151,13 @@ func (u *UseCase) Submit(ctx context.Context, principal Principal, raw []byte) (
 func (u *UseCase) admit(ctx context.Context) error {
 	pending, oldest, err := u.backlogSample(ctx)
 	if err != nil {
-		return fail(constant.CodeDependencyUnavailable, "积压统计不可用", "")
+		return fail(constant.ReasonBacklogUnavailable, "积压统计不可用", "")
 	}
 	if pending > u.limits.MaxPending {
-		return fail(constant.CodeAdmissionPaused, "积压超过受理阈值", "")
+		return fail(constant.ReasonBacklogCount, "积压超过受理阈值", "")
 	}
 	if oldest != nil && u.now().Sub(*oldest) > u.limits.MaxOldest {
-		return fail(constant.CodeAdmissionPaused, "积压时间超过受理阈值", "")
+		return fail(constant.ReasonBacklogAge, "积压时间超过受理阈值", "")
 	}
 	return nil
 }
@@ -190,20 +190,20 @@ func (u *UseCase) backlogSample(ctx context.Context) (int64, *time.Time, error) 
 func (u *UseCase) currentRelease(ctx context.Context) (uint64, string, error) {
 	id, err := u.releases.LoadCurrentID(ctx)
 	if errors.Is(err, data_interface.ErrNoCurrent) || errors.Is(err, data_interface.ErrReleaseNotFound) {
-		return 0, "", fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return 0, "", fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	}
 	if err != nil {
 		return 0, "", translatePlan(err)
 	}
 	rec, err := u.releases.Load(ctx, id)
 	if errors.Is(err, data_interface.ErrReleaseNotFound) || errors.Is(err, data_interface.ErrNoCurrent) {
-		return 0, "", fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return 0, "", fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	}
 	if err != nil {
 		return 0, "", translatePlan(err)
 	}
 	if rec.ContentSHA256 == "" || rec.ReleaseID != id {
-		return 0, "", fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return 0, "", fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	}
 	return id, rec.ContentSHA256, nil
 }
@@ -233,7 +233,7 @@ func acceptanceOf(ev data_interface.AcceptedEvent, fingerprint string) (Acceptan
 		return Acceptance{}, err
 	}
 	if !same {
-		return Acceptance{}, fail(constant.CodeIdempotencyConflict, "相同来源事件的内容不一致", "source_event_id")
+		return Acceptance{}, fail(constant.ReasonEventIDConflict, "相同来源事件的内容不一致", "source_event_id")
 	}
 	if len(ev.Deliveries) == 0 {
 		return Acceptance{}, fail(constant.CodeInternal, "受理数据不一致", "")
@@ -264,7 +264,7 @@ func acceptanceOf(ev data_interface.AcceptedEvent, fingerprint string) (Acceptan
 func checkPlan(plan domain.DeliveryPlan, releaseID uint64, limits Limits) error {
 	ref, err := domain.FormatInternalID(releaseID)
 	if err != nil || plan.ReleaseRef != ref {
-		return fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	}
 	if len(plan.Targets) == 0 {
 		return fail(constant.CodeNoMatchingRoute, "没有匹配的路由", "")
@@ -276,7 +276,7 @@ func checkPlan(plan domain.DeliveryPlan, releaseID uint64, limits Limits) error 
 	seen := map[string]struct{}{}
 	for _, target := range plan.Targets {
 		if _, ok := seen[target.RouteTargetID]; ok {
-			return fail(constant.CodeMappingInvalid, "路由目标重复", target.RouteTargetID)
+			return fail(constant.ReasonDuplicateTarget, "路由目标重复", target.RouteTargetID)
 		}
 		seen[target.RouteTargetID] = struct{}{}
 		if err := domain.CheckTarget(target); err != nil {
@@ -285,7 +285,7 @@ func checkPlan(plan domain.DeliveryPlan, releaseID uint64, limits Limits) error 
 		n += int64(len(target.PayloadCanonical)) + int64(len(target.FixedTarget))
 	}
 	if n > int64(limits.MaxPlanBytes) {
-		return fail(constant.CodeLimitExceeded, "固定计划超过上限", "")
+		return fail(constant.ReasonPlanTooLarge, "固定计划超过上限", "")
 	}
 	if _, err := domain.NewInitialDelivery(time.Now().UTC(), plan.RoundPolicy); err != nil {
 		return err
@@ -295,14 +295,14 @@ func checkPlan(plan domain.DeliveryPlan, releaseID uint64, limits Limits) error 
 
 func parseEnvelope(principal Principal, raw []byte) (domain.EventEnvelope, error) {
 	if err := domain.ValidateCallerID(principal.CallerID); err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeForbidden, "调用方不在授权范围", "caller_id")
+		return domain.EventEnvelope{}, fail(constant.ReasonCallerScopeDenied, "调用方不在授权范围", "caller_id")
 	}
 	if !slices.Contains(principal.Scopes, principal.CallerID) {
-		return domain.EventEnvelope{}, fail(constant.CodeForbidden, "调用方不在授权范围", "caller_id")
+		return domain.EventEnvelope{}, fail(constant.ReasonCallerScopeDenied, "调用方不在授权范围", "caller_id")
 	}
 	value, err := canonicaljson.ParseObject(raw)
 	if err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "JSON 不是完整对象", "")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidJSON, "JSON 不是完整对象", "")
 	}
 	fields, _ := value.Object()
 	allowed := map[string]struct{}{
@@ -312,7 +312,7 @@ func parseEnvelope(principal Principal, raw []byte) (domain.EventEnvelope, error
 	present := map[string]canonicaljson.Value{}
 	for _, field := range fields {
 		if _, ok := allowed[field.Key]; !ok {
-			return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "请求包含未知字段", field.Key)
+			return domain.EventEnvelope{}, fail(constant.ReasonUnknownField, "请求包含未知字段", field.Key)
 		}
 		present[field.Key] = field.Value
 	}
@@ -325,21 +325,21 @@ func parseEnvelope(principal Principal, raw []byte) (domain.EventEnvelope, error
 		return domain.EventEnvelope{}, err
 	}
 	if err := domain.ValidateExternalID("source_event_id", sourceEvent); err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "来源事件标识不合法", "source_event_id")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldValue, "来源事件标识不合法", "source_event_id")
 	}
 	eventType, err := requiredText(present, "event_type")
 	if err != nil {
 		return domain.EventEnvelope{}, err
 	}
 	if err := domain.ValidateEventType(eventType); err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "事件类型不合法", "event_type")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldValue, "事件类型不合法", "event_type")
 	}
 	schemaVersion, err := requiredText(present, "schema_version")
 	if err != nil {
 		return domain.EventEnvelope{}, err
 	}
 	if err := domain.ValidateSchemaVersion(schemaVersion); err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "数据版本不合法", "schema_version")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldValue, "数据版本不合法", "schema_version")
 	}
 	occurredText, err := requiredText(present, "occurred_at")
 	if err != nil {
@@ -347,25 +347,25 @@ func parseEnvelope(principal Principal, raw []byte) (domain.EventEnvelope, error
 	}
 	occurred, err := domain.ParseRFC3339("occurred_at", occurredText)
 	if err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "发生时间不合法", "occurred_at")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldValue, "发生时间不合法", "occurred_at")
 	}
 	objectType, err := requiredText(present, "business_object_type")
 	if err != nil {
 		return domain.EventEnvelope{}, err
 	}
 	if err := domain.ValidateBusinessObjectType(objectType); err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "业务对象类型不合法", "business_object_type")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldValue, "业务对象类型不合法", "business_object_type")
 	}
 	objectID, err := requiredText(present, "business_object_id")
 	if err != nil {
 		return domain.EventEnvelope{}, err
 	}
 	if err := domain.ValidateExternalID("business_object_id", objectID); err != nil {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "业务对象标识不合法", "business_object_id")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldValue, "业务对象标识不合法", "business_object_id")
 	}
 	data, ok := present["data"]
 	if !ok || data.Kind() == canonicaljson.KindNull || data.Kind() != canonicaljson.KindObject {
-		return domain.EventEnvelope{}, fail(constant.CodeInvalidRequest, "事件数据必须是 JSON 对象", "data")
+		return domain.EventEnvelope{}, fail(constant.ReasonInvalidFieldType, "事件数据必须是 JSON 对象", "data")
 	}
 	return domain.EventEnvelope{
 		CallerID: principal.CallerID, SourceBusiness: source, SourceEventID: sourceEvent,
@@ -379,22 +379,22 @@ func parseEnvelope(principal Principal, raw []byte) (domain.EventEnvelope, error
 func resolveSource(allowed []string, value canonicaljson.Value, present bool) (string, error) {
 	if !present {
 		if len(allowed) != 1 {
-			return "", fail(constant.CodeInvalidRequest, "来源不明确", "source_business")
+			return "", fail(constant.ReasonSourceAmbiguous, "来源不明确", "source_business")
 		}
 		if err := domain.ValidateSourceBusiness(allowed[0]); err != nil {
-			return "", fail(constant.CodeForbidden, "来源不在授权范围", "source_business")
+			return "", fail(constant.ReasonSourceDenied, "来源不在授权范围", "source_business")
 		}
 		return allowed[0], nil
 	}
 	if value.Kind() == canonicaljson.KindNull {
-		return "", fail(constant.CodeInvalidRequest, "来源不明确", "source_business")
+		return "", fail(constant.ReasonSourceAmbiguous, "来源不明确", "source_business")
 	}
 	text, ok := value.Text()
 	if !ok || domain.ValidateSourceBusiness(text) != nil {
-		return "", fail(constant.CodeInvalidRequest, "来源不合法", "source_business")
+		return "", fail(constant.ReasonInvalidFieldValue, "来源不合法", "source_business")
 	}
 	if !slices.Contains(allowed, text) {
-		return "", fail(constant.CodeForbidden, "来源不在授权范围", "source_business")
+		return "", fail(constant.ReasonSourceDenied, "来源不在授权范围", "source_business")
 	}
 	return text, nil
 }
@@ -402,11 +402,11 @@ func resolveSource(allowed []string, value canonicaljson.Value, present bool) (s
 func requiredText(present map[string]canonicaljson.Value, key string) (string, error) {
 	value, ok := present[key]
 	if !ok || value.Kind() == canonicaljson.KindNull {
-		return "", fail(constant.CodeInvalidRequest, "缺少必填字段", key)
+		return "", fail(constant.ReasonMissingField, "缺少必填字段", key)
 	}
 	text, ok := value.Text()
 	if !ok {
-		return "", fail(constant.CodeInvalidRequest, "字段类型不正确", key)
+		return "", fail(constant.ReasonInvalidFieldType, "字段类型不正确", key)
 	}
 	return text, nil
 }
@@ -419,7 +419,7 @@ func has(present map[string]canonicaljson.Value, key string) bool {
 func translatePlan(err error) error {
 	var de *domain.Error
 	if !errors.As(err, &de) || de == nil {
-		return fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	}
 	switch de.Code {
 	case constant.CodeUnsupportedSchema:
@@ -433,9 +433,9 @@ func translatePlan(err error) error {
 		}
 		return de
 	case constant.CodeConfigurationUnavailable:
-		return fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	case constant.CodeInternal:
-		return fail(constant.CodeDependencyUnavailable, "当前发布不可读取", "")
+		return fail(constant.ReasonEventRelease, "当前发布不可读取", "")
 	default:
 		return de
 	}
@@ -457,7 +457,7 @@ func infra(err error) error {
 	if errors.As(err, &de) {
 		return err
 	}
-	return fail(constant.CodeDependencyUnavailable, "数据库不可用", "")
+	return fail(constant.ReasonEventStore, "数据库不可用", "")
 }
 
 func fail(code, message, path string) error {

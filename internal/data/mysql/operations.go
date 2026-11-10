@@ -46,7 +46,7 @@ func existingOp(ctx context.Context, tx *sql.Tx, m data_interface.OperationMeta)
 		return nil, false, err
 	}
 	if fp != m.Fingerprint {
-		return nil, false, domainErr(constant.CodeIdempotencyConflict, "相同操作键的参数不一致")
+		return nil, false, domainErr(constant.ReasonOperationKey, "相同操作键的参数不一致")
 	}
 	return result, true, nil
 }
@@ -73,11 +73,14 @@ func replayTx(ctx context.Context, tx *sql.Tx, in data_interface.ReplayInput) ([
 	if err != nil {
 		return nil, err
 	}
-	if task.Status != enums.TaskFailed && task.Status != enums.TaskUnknown || task.CurrentAttemptID != nil || task.LeaseToken != "" {
-		return nil, domainErr(constant.CodeStateConflict, "任务当前不能重投")
+	if task.Status != enums.TaskFailed && task.Status != enums.TaskUnknown {
+		return nil, domainErr(constant.ReasonTaskNotRetryable, "任务当前不能重投")
+	}
+	if task.CurrentAttemptID != nil || task.LeaseToken != "" {
+		return nil, domainErr(constant.ReasonTaskLeaseActive, "任务仍有当前尝试或领取者")
 	}
 	if task.RowVersion != in.ExpectedRow {
-		return nil, domainErr(constant.CodeVersionConflict, "任务版本已变化")
+		return nil, domainErr(constant.ReasonTaskVersion, "任务版本已变化")
 	}
 	deadline := now.Add(in.Policy.RoundTimeout)
 	var risk any
@@ -99,7 +102,7 @@ func replayTx(ctx context.Context, tx *sql.Tx, in data_interface.ReplayInput) ([
 		return nil, err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return nil, domainErr(constant.CodeVersionConflict, "任务版本已变化")
+		return nil, domainErr(constant.ReasonTaskVersion, "任务版本已变化")
 	}
 	fresh, err := loadTask(ctx, tx, task.DeliveryID)
 	if err != nil {
@@ -169,7 +172,7 @@ func resolveTx(ctx context.Context, tx *sql.Tx, in data_interface.ResolveInput) 
 		return nil, err
 	}
 	if n, _ := res.RowsAffected(); n != 1 {
-		return nil, domainErr(constant.CodeVersionConflict, "任务版本已变化")
+		return nil, domainErr(constant.ReasonTaskVersion, "任务版本已变化")
 	}
 	fresh, err := loadTask(ctx, tx, task.DeliveryID)
 	if err != nil {

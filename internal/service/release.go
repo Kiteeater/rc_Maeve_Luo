@@ -6,6 +6,7 @@ import (
 
 	"notifier/internal/biz/biz_config"
 	"notifier/internal/canonicaljson"
+	"notifier/internal/constant"
 	"notifier/internal/domain"
 )
 
@@ -272,7 +273,7 @@ func (s *ReleaseService) readObject(w http.ResponseWriter, r *http.Request, allo
 	}
 	root, err := canonicaljson.ParseObject(body)
 	if err != nil {
-		de, _ := domain.NewError(CodeInvalidRequest, "JSON 不是完整对象", "", nil)
+		de, _ := domain.NewError(constant.ReasonInvalidJSON, "JSON 不是完整对象", "", nil)
 		WriteError(w, r, de)
 		return biz_config.Principal{}, canonicaljson.Value{}, false
 	}

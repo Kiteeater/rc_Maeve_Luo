@@ -178,7 +178,7 @@ event_id 或来源事件 ID 在明确单一 caller 范围内唯一过滤时，�
   "row_version":3,"schedule_version":2,"last_attempt_id":"4001","current_attempt_id":null,
   "scheduled_at":"2026-11-09T01:30:10Z","next_retry_at":"2026-11-09T01:30:10Z","next_check_at":null,
   "round_deadline_at":"2026-11-10T01:30:01Z","round_finished_at":null,
-  "last_error_code":"HTTP_TIMEOUT","last_error_reason":"供应商响应超时","blocked_reason":null,"needs_manual_action":false
+  "last_error_code":"HTTP_TIMEOUT","last_error_category":"transport","last_error_reason":"供应商响应超时","blocked_reason":null,"needs_manual_action":false
 }
 ```
 

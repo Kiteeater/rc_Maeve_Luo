@@ -137,11 +137,24 @@ func TestPRV05_LimiterFailureDoesNotPass(t *testing.T) {
 	e := newEnv(t, func(w http.ResponseWriter, _ *http.Request) { writeJSON(w, 200, `{"accepted":true}`) })
 	e.lim.err = data_interface.ErrRateLimiterDown
 	p := e.prepare(t, e.task("bearer", "key", 3600), t0)
-	if p.Kind != domain.PrepareWait || p.RateLimitUntil.IsZero() || p.CredentialHandle != "" {
+	if p.Kind != domain.PrepareWait || p.ErrorCode != constant.ErrRateLimiterDown || p.RateLimitUntil.IsZero() || p.CredentialHandle != "" {
 		t.Fatalf("limiter down must WAIT bounded: %+v", p)
 	}
 	if e.count() != 0 {
 		t.Fatal("no business request on limiter failure")
+	}
+}
+
+func TestTimeoutClassificationSurvivesProtocolInterpretation(t *testing.T) {
+	runtime := &biz_provider.Runtime{}
+	result, err := runtime.Interpret(context.Background(), data_interface.TaskRecord{}, data_interface.BuiltRequest{}, data_interface.SendResponse{
+		ErrorCode: constant.ErrHTTPTimeout, Facts: domain.TransportFacts{Invoked: true},
+	})
+	if err != nil || result.ErrorCode != constant.ErrHTTPTimeout || result.Certainty != enums.CertaintyUncertain {
+		t.Fatalf("timeout classification = %+v %v", result, err)
+	}
+	if result.ErrorReason == "" || strings.Contains(result.ErrorReason, "provider code") {
+		t.Fatalf("timeout has no meaningful description: %+v", result)
 	}
 }
 
@@ -216,7 +229,7 @@ func TestPRV08_SensitiveAndOversizedResponses(t *testing.T) {
 		writeJSON(w, 200, `{"accepted":true,"pad":"`+strings.Repeat("x", 10000)+`"}`)
 	})
 	sent, in = big.run(t, big.task("bearer", "key", 3600))
-	if !sent.Facts.TooLarge || sent.Facts.BytesRead != 4097 || !sent.Truncated || in.ErrorCode != constant.ErrProtocolInvalid || in.Outcome != enums.OutcomeUncertain {
+	if !sent.Facts.TooLarge || sent.Facts.BytesRead != 4097 || !sent.Truncated || in.ErrorCode != constant.ErrResponseTooLarge || in.Outcome != enums.OutcomeUncertain {
 		t.Fatalf("oversized: read=%d %+v %+v", sent.Facts.BytesRead, sent.Facts.TooLarge, in)
 	}
 }
