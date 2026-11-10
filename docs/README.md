@@ -28,7 +28,7 @@ v0.2 将规格细化为字段/参数表、领域端口、完整事务、失败�
 | S07 | [人工处置](07-delivery-operations.spec.md) | 指定任务重投、UNKNOWN 核对、操作幂等和审计 | `service`、`biz/biz_delivery`、`data/mysql` |
 | S08 | [查询与运行可见性](08-delivery-tracking.spec.md) | 查询、时间线、概览、告警和协调清理 | `service`、`biz/biz_tracking`、`data/mysql`、`pkg/metrics` |
 
-表中路径均相对 `internal`（`pkg/metrics` 除外）。所有用例经 `data_interface` 使用仓储和外部能力，完整分层约束见 [技术方案第 12 节](../TECH_DESIGN.md#12-接口与代码组织)。路径是规格中的建议位置，实际目录以 [README 代码组织](../README.md#代码组织) 为准。
+表中路径均相对 `internal`（`pkg/metrics` 除外）。所有用例经 `data_interface` 使用仓储和外部能力，完整分层约束见 [技术方案第 12 节](../TECH_DESIGN.md#12-接口与代码组织)。路径是规格中的建议位置，实际目录见 [代码组织](development.md#代码组织)。
 
 ## 2. 依赖与边界
 
